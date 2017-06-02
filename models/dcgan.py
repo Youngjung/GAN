@@ -16,13 +16,8 @@ def conv_out_size_same(size, stride):
 	return int(math.ceil(float(size) / float(stride)))
 
 class DCGAN(object):
-	def __init__(self, sess, input_height=108, input_width=108, crop=True,
-				 batch_size=64, sample_num = 64, output_height=64, output_width=64,
-				 y_dim=None, z_dim=100, gf_dim=64, df_dim=64,
-				 gfc_dim=1024, dfc_dim=1024, c_dim=3, dataset_name='default',
-				 input_fname_pattern='*.jpg', checkpoint_dir=None, sample_dir=None):
+	def __init__(self, sess, options):
 		"""
-
 		Args:
 			sess: TensorFlow session
 			batch_size: The size of batch. Should be specified before training.
@@ -35,24 +30,26 @@ class DCGAN(object):
 			c_dim: (optional) Dimension of image color. For grayscale input, set to 1. [3]
 		"""
 		self.sess = sess
-		self.crop = crop
+		self.crop = options.crop
 
-		self.batch_size = batch_size
-		self.sample_num = sample_num
+		self.batch_size = options.batch_size
+		self.sample_num = options.batch_size
 
-		self.input_height = input_height
-		self.input_width = input_width
-		self.output_height = output_height
-		self.output_width = output_width
+		self.input_height = options.input_height
+		self.input_width = options.input_width
+		self.output_height = options.output_height
+		self.output_width = options.output_width
 
-		self.y_dim = y_dim
-		self.z_dim = z_dim
+		self.y_dim = options.y_dim
+		self.z_dim = options.z_dim
 
-		self.gf_dim = gf_dim
-		self.df_dim = df_dim
+		self.gf_dim = options.gf_dim
+		self.df_dim = options.df_dim
 
-		self.gfc_dim = gfc_dim
-		self.dfc_dim = dfc_dim
+		self.gfc_dim = options.gfc_dim
+		self.dfc_dim = options.dfc_dim
+
+		self.print_every = options.print_every
 
 		# batch normalization : deals with poor initialization helps gradient flow
 		self.d_bn1 = batch_norm(name='d_bn1')
@@ -68,15 +65,15 @@ class DCGAN(object):
 		if not self.y_dim:
 			self.g_bn3 = batch_norm(name='g_bn3')
 
-		self.dataset_name = dataset_name
-		self.input_fname_pattern = input_fname_pattern
-		self.checkpoint_dir = checkpoint_dir
+		self.dataset = options.dataset
+		self.input_fname_pattern = options.input_fname_pattern
+		self.checkpoint_dir = options.checkpoint_dir
 
-		if self.dataset_name == 'mnist':
+		if self.dataset == 'mnist':
 			self.data_X, self.data_y = self.load_mnist()
 			self.c_dim = self.data_X[0].shape[-1]
 		else:
-			self.data = glob(os.path.join("./data", self.dataset_name, self.input_fname_pattern))
+			self.data = glob(os.path.join("./data", self.dataset, self.input_fname_pattern))
 			self.c_dim = imread(self.data[0]).shape[-1]
 
 		self.grayscale = (self.c_dim == 1)
@@ -119,7 +116,7 @@ class DCGAN(object):
 
 		self.d_sum = tf.summary.histogram("d", self.D)
 		self.d__sum = tf.summary.histogram("d_", self.D_)
-		self.G_sum = image_summary("G", self.G)
+		self.G_sum = tf.summary.image("G", self.G)
 
 		def sigmoid_cross_entropy_with_logits(x, y):
 			try:
@@ -134,13 +131,13 @@ class DCGAN(object):
 		self.g_loss = tf.reduce_mean(
 			sigmoid_cross_entropy_with_logits(self.D_logits_, tf.ones_like(self.D_)))
 
-		self.d_loss_real_sum = scalar_summary("d_loss_real", self.d_loss_real)
-		self.d_loss_fake_sum = scalar_summary("d_loss_fake", self.d_loss_fake)
+		self.d_loss_real_sum = tf.summary.scalar("d_loss_real", self.d_loss_real)
+		self.d_loss_fake_sum = tf.summary.scalar("d_loss_fake", self.d_loss_fake)
 													
 		self.d_loss = self.d_loss_real + self.d_loss_fake
 
-		self.g_loss_sum = scalar_summary("g_loss", self.g_loss)
-		self.d_loss_sum = scalar_summary("d_loss", self.d_loss)
+		self.g_loss_sum = tf.summary.scalar("g_loss", self.g_loss)
+		self.d_loss_sum = tf.summary.scalar("d_loss", self.d_loss)
 
 		t_vars = tf.trainable_variables()
 
@@ -150,20 +147,18 @@ class DCGAN(object):
 		self.saver = tf.train.Saver()
 
 	def train(self, config):
-		d_optim = tf.train.AdamOptimizer(config.learning_rate, beta1=config.beta1) \
+		d_optim = tf.train.AdamOptimizer(config.lr, beta1=config.beta1) \
 							.minimize(self.d_loss, var_list=self.d_vars)
-		g_optim = tf.train.AdamOptimizer(config.learning_rate, beta1=config.beta1) \
+		g_optim = tf.train.AdamOptimizer(config.lr, beta1=config.beta1) \
 							.minimize(self.g_loss, var_list=self.g_vars)
 		try:
 			tf.global_variables_initializer().run()
 		except:
 			tf.initialize_all_variables().run()
 
-		self.g_sum = merge_summary([self.z_sum, self.d__sum,
-			self.G_sum, self.d_loss_fake_sum, self.g_loss_sum])
-		self.d_sum = merge_summary(
-				[self.z_sum, self.d_sum, self.d_loss_real_sum, self.d_loss_sum])
-		self.writer = SummaryWriter("./logs", self.sess.graph)
+		self.g_sum = tf.summary.merge([self.z_sum, self.d__sum, self.G_sum, self.d_loss_fake_sum, self.g_loss_sum])
+		self.d_sum = tf.summary.merge([self.z_sum, self.d_sum, self.d_loss_real_sum, self.d_loss_sum])
+		self.writer = tf.summary.FileWriter("./logs", self.sess.graph)
 
 		sample_z = np.random.uniform(-1, 1, size=(self.sample_num , self.z_dim))
 		
@@ -280,7 +275,8 @@ class DCGAN(object):
 					errG = self.g_loss.eval({self.z: batch_z})
 
 				counter += 1
-				print("Epoch: [%2d] [%4d/%4d] time: %4.4f, d_loss: %.8f, g_loss: %.8f" \
+				if idx % self.print_every==0:
+					print("Epoch: [%2d] [%4d/%4d] time: %4.4f, d_loss: %.8f, g_loss: %.8f" \
 					% (epoch, idx, batch_idxs,
 						time.time() - start_time, errD_fake+errD_real, errG))
 
@@ -462,7 +458,7 @@ class DCGAN(object):
 				return tf.nn.sigmoid(deconv2d(h2, [self.batch_size, s_h, s_w, self.c_dim], name='g_h3'))
 
 	def load_mnist(self):
-		data_dir = os.path.join("./data", self.dataset_name)
+		data_dir = os.path.join("./data", self.dataset)
 		
 		fd = open(os.path.join(data_dir,'train-images-idx3-ubyte'))
 		loaded = np.fromfile(file=fd,dtype=np.uint8)
@@ -501,7 +497,7 @@ class DCGAN(object):
 	@property
 	def model_dir(self):
 		return "{}_{}_{}_{}".format(
-				self.dataset_name, self.batch_size,
+				self.dataset, self.batch_size,
 				self.output_height, self.output_width)
 			
 	def save(self, checkpoint_dir, step):
