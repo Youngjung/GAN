@@ -30,6 +30,7 @@ class DCGAN(object):
 			c_dim: (optional) Dimension of image color. For grayscale input, set to 1. [3]
 		"""
 		self.sess = sess
+		self.model = options.model
 		self.crop = options.crop
 
 		self.batch_size = options.batch_size
@@ -82,7 +83,7 @@ class DCGAN(object):
 
 	def build_model(self):
 		if self.y_dim:
-			self.y= tf.placeholder(tf.float32, [self.batch_size, self.y_dim], name='y')
+			self.t_y= tf.placeholder(tf.float32, [self.batch_size, self.y_dim], name='y')
 
 		if self.crop:
 			image_dims = [self.output_height, self.output_width, self.c_dim]
@@ -97,21 +98,21 @@ class DCGAN(object):
 		inputs = self.inputs
 		sample_inputs = self.sample_inputs
 
-		self.z = tf.placeholder(
+		self.t_z = tf.placeholder(
 			tf.float32, [None, self.z_dim], name='z')
-		self.z_sum = tf.summary.histogram("z", self.z)
+		self.z_sum = tf.summary.histogram("z", self.t_z)
 
 		if self.y_dim:
-			self.G = self.generator(self.z, self.y)
-			self.D, self.D_logits = self.discriminator(inputs, self.y, reuse=False)
+			self.G = self.generator(self.t_z, self.t_y)
+			self.D, self.D_logits = self.discriminator(inputs, self.t_y, reuse=False)
 
-			self.sampler = self.sampler(self.z, self.y)
-			self.D_, self.D_logits_ = self.discriminator(self.G, self.y, reuse=True)
+			self.sampler = self.sampler(self.t_z, self.t_y)
+			self.D_, self.D_logits_ = self.discriminator(self.G, self.t_y, reuse=True)
 		else:
-			self.G = self.generator(self.z)
+			self.G = self.generator(self.t_z)
 			self.D, self.D_logits = self.discriminator(inputs)
 
-			self.sampler = self.sampler(self.z)
+			self.sampler = self.sampler(self.t_z)
 			self.D_, self.D_logits_ = self.discriminator(self.G, reuse=True)
 
 		self.d_sum = tf.summary.histogram("d", self.D)
@@ -189,7 +190,7 @@ class DCGAN(object):
 		else:
 			print(" [!] Load failed...")
 
-		for epoch in xrange(config.epoch):
+		for epoch in xrange(config.nEpochs):
 			if config.dataset == 'mnist':
 				batch_idxs = min(len(self.data_X), config.train_size) // config.batch_size
 			else:			
@@ -224,55 +225,55 @@ class DCGAN(object):
 					_, summary_str = self.sess.run([d_optim, self.d_sum],
 						feed_dict={ 
 							self.inputs: batch_images,
-							self.z: batch_z,
-							self.y:batch_labels,
+							self.t_z: batch_z,
+							self.t_y:batch_labels,
 						})
 					self.writer.add_summary(summary_str, counter)
 
 					# Update G network
 					_, summary_str = self.sess.run([g_optim, self.g_sum],
 						feed_dict={
-							self.z: batch_z, 
-							self.y:batch_labels,
+							self.t_z: batch_z, 
+							self.t_y:batch_labels,
 						})
 					self.writer.add_summary(summary_str, counter)
 
 					# Run g_optim twice to make sure that d_loss does not go to zero (different from paper)
 					_, summary_str = self.sess.run([g_optim, self.g_sum],
-						feed_dict={ self.z: batch_z, self.y:batch_labels })
+						feed_dict={ self.t_z: batch_z, self.t_y:batch_labels })
 					self.writer.add_summary(summary_str, counter)
 					
 					errD_fake = self.d_loss_fake.eval({
-							self.z: batch_z, 
-							self.y:batch_labels
+							self.t_z: batch_z, 
+							self.t_y:batch_labels
 					})
 					errD_real = self.d_loss_real.eval({
 							self.inputs: batch_images,
-							self.y:batch_labels
+							self.t_y:batch_labels
 					})
 					errG = self.g_loss.eval({
-							self.z: batch_z,
-							self.y: batch_labels
+							self.t_z: batch_z,
+							self.t_y: batch_labels
 					})
 				else:
 					# Update D network
 					_, summary_str = self.sess.run([d_optim, self.d_sum],
-						feed_dict={ self.inputs: batch_images, self.z: batch_z })
+						feed_dict={ self.inputs: batch_images, self.t_z: batch_z })
 					self.writer.add_summary(summary_str, counter)
 
 					# Update G network
 					_, summary_str = self.sess.run([g_optim, self.g_sum],
-						feed_dict={ self.z: batch_z })
+						feed_dict={ self.t_z: batch_z })
 					self.writer.add_summary(summary_str, counter)
 
 					# Run g_optim twice to make sure that d_loss does not go to zero (different from paper)
 					_, summary_str = self.sess.run([g_optim, self.g_sum],
-						feed_dict={ self.z: batch_z })
+						feed_dict={ self.t_z: batch_z })
 					self.writer.add_summary(summary_str, counter)
 					
-					errD_fake = self.d_loss_fake.eval({ self.z: batch_z })
+					errD_fake = self.d_loss_fake.eval({ self.t_z: batch_z })
 					errD_real = self.d_loss_real.eval({ self.inputs: batch_images })
-					errG = self.g_loss.eval({self.z: batch_z})
+					errG = self.g_loss.eval({self.t_z: batch_z})
 
 				counter += 1
 				if idx % self.print_every==0:
@@ -285,9 +286,9 @@ class DCGAN(object):
 						samples, d_loss, g_loss = self.sess.run(
 							[self.sampler, self.d_loss, self.g_loss],
 							feed_dict={
-									self.z: sample_z,
+									self.t_z: sample_z,
 									self.inputs: sample_inputs,
-									self.y:sample_labels,
+									self.t_y:sample_labels,
 							}
 						)
 						manifold_h = int(np.ceil(np.sqrt(samples.shape[0])))
@@ -300,7 +301,7 @@ class DCGAN(object):
 							samples, d_loss, g_loss = self.sess.run(
 								[self.sampler, self.d_loss, self.g_loss],
 								feed_dict={
-										self.z: sample_z,
+										self.t_z: sample_z,
 										self.inputs: sample_inputs,
 								},
 							)
@@ -356,11 +357,11 @@ class DCGAN(object):
 				s_h16, s_w16 = conv_out_size_same(s_h8, 2), conv_out_size_same(s_w8, 2)
 
 				# project `z` and reshape
-				self.z_, self.h0_w, self.h0_b = linear(
+				self.t_z_, self.h0_w, self.h0_b = linear(
 						z, self.gf_dim*8*s_h16*s_w16, 'g_h0_lin', with_w=True)
 
 				self.h0 = tf.reshape(
-						self.z_, [-1, s_h16, s_w16, self.gf_dim * 8])
+						self.t_z_, [-1, s_h16, s_w16, self.gf_dim * 8])
 				h0 = tf.nn.relu(self.g_bn0(self.h0))
 
 				self.h1, self.h1_w, self.h1_b = deconv2d(
@@ -496,9 +497,7 @@ class DCGAN(object):
 
 	@property
 	def model_dir(self):
-		return "{}_{}_{}_{}".format(
-				self.dataset, self.batch_size,
-				self.output_height, self.output_width)
+		return "{}_{}_{}_{}_{}".format( self.model, self.dataset, self.batch_size, self.output_height, self.output_width)
 			
 	def save(self, checkpoint_dir, step):
 		model_name = "DCGAN.model"

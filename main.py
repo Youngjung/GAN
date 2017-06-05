@@ -11,7 +11,7 @@ import tensorflow as tf
 
 parser = argparse.ArgumentParser(description='')
 parser.add_argument('--model', default='DCGAN', help='model to use [DCGAN, Text2Image]')
-parser.add_argument('--epoch', type=int, default=25, help='# of epoch')
+parser.add_argument('--nEpochs', type=int, default=25, help='# of epoch')
 parser.add_argument('--save_every', type=int, default=30, 
 						help='Save Model/Samples every x iterations over batches(does not overwrite previously saved models)')
 parser.add_argument('--print_every', type=int, default=1, 
@@ -53,15 +53,13 @@ parser.add_argument('--df_dim', type=int, default=64, help='Number of conv in th
 parser.add_argument('--gfc_dim', type=int, default=1024, help='Dimension of gen untis for fully connected layer [1024]')
 parser.add_argument('--dfc_dim', type=int, default=1024, help='Dimension of discrim untis for for fully connected layer [1024]')
 parser.add_argument('--caption_vector_length', type=int, default=2400, help='Caption Vector Length')
-parser.add_argument('--learning_rate', type=float, default=0.0002, help='Learning Rate')
 parser.add_argument('--resume_model', type=str, default=None, help='Pre-Trained Model Path, to resume from')
-parser.add_argument('--data_set', type=str, default="flowers", help='Dat set: MS-COCO, flowers')
 parser.add_argument('--input_height', type=int, default=108, help="The size of image to use (will be center cropped)")
 parser.add_argument('--input_width', type=int, default=None,
 						help="The size of image to use (will be center cropped), None=input_height")
 parser.add_argument('--output_height', type=int, default=64, help="The size of output image to produce" )
 parser.add_argument('--output_width', type=int, default=None, help="The size of output image to produce , None=output_height")
-parser.add_argument('--dataset', default='celebA', help="The name of dataset [celebA, mnist, lsun, horse2zebra]")
+parser.add_argument('--dataset', default='celebA', help="The name of dataset [celebA, mnist, lsun, horse2zebra, mscoco, flowers]")
 parser.add_argument('--data_dir', type=str, default="data", help='Data Directory')
 parser.add_argument('--input_fname_pattern', default='*.jpg', help="Glob pattern of filename of input images [*]")
 parser.add_argument('--crop', type=bool, default=True, help="True for training, False for testing [False]")
@@ -69,8 +67,6 @@ parser.add_argument('--visualize', type=bool,default=False, help="True for visua
 #parser.add_argument('--', type=int, default=None, help="")
 
 args = parser.parse_args()
-print( args )
-
 
 def main(_):
 
@@ -94,34 +90,21 @@ def main(_):
 			if args.dataset == 'mnist':
 				args.y_dim=10
 			model = DCGAN( sess, args )
-#			model = DCGAN(
-#					sess,
-#					input_width=args.input_width,
-#					input_height=args.input_height,
-#					output_width=args.output_width,
-#					output_height=args.output_height,
-#					batch_size=args.batch_size,
-#					sample_num=args.batch_size,
-#					y_dim=y_dim,
-#					dataset_name=args.dataset,
-#					input_fname_pattern=args.input_fname_pattern,
-#					crop=args.crop,
-#					checkpoint_dir=args.checkpoint_dir,
-#					sample_dir=args.sample_dir)
 		elif args.model == 'Text2Image':
 			model = Text2Image( sess, args )
 
 		show_all_variables()
 
 		if args.phase=='train':
-			model.train(args)
+			model.train()
 		else:
 			if not model.load(args.checkpoint_dir)[0]:
 				raise Exception("[!] Train a model first, then run test mode")
 
 		# Below is codes for visualization
-		OPTION = 1
-		visualize(sess, model, args, OPTION)
-
+		if args.model == 'DCGAN':
+			OPTION = 1
+			visualize(sess, model, args, OPTION)
+	
 if __name__ == '__main__':
 	tf.app.run()
