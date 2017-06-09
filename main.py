@@ -5,6 +5,7 @@ import numpy as np
 
 from models.dcgan import DCGAN
 from models.text2image import Text2Image
+from models.cyclegan import CycleGAN
 from models.utils import pp, visualize, to_json, show_all_variables
 
 import tensorflow as tf
@@ -12,7 +13,7 @@ import tensorflow as tf
 parser = argparse.ArgumentParser(description='')
 parser.add_argument('--model', default='DCGAN', help='model to use [DCGAN, Text2Image]')
 parser.add_argument('--nEpochs', type=int, default=25, help='# of epoch')
-parser.add_argument('--save_every', type=int, default=30, 
+parser.add_argument('--save_every_batch', type=int, default=30, 
 						help='Save Model/Samples every x iterations over batches(does not overwrite previously saved models)')
 parser.add_argument('--print_every', type=int, default=1, 
 						help='print the debug information every print_freq iterations')
@@ -92,6 +93,10 @@ def main(_):
 			model = DCGAN( sess, args )
 		elif args.model == 'Text2Image':
 			model = Text2Image( sess, args )
+		elif args.model == 'cycleGAN':
+			model = cyclegan( sess, args )
+		else
+			raise Exception("undefined model")
 
 		show_all_variables()
 
