@@ -2,6 +2,7 @@ import argparse
 import os
 import scipy.misc
 import numpy as np
+import pdb
 
 from models.dcgan import DCGAN
 from models.text2image import Text2Image
@@ -10,8 +11,16 @@ from models.utils import pp, visualize, to_json, show_all_variables
 
 import tensorflow as tf
 
+def str2bool(v):
+	if v.lower() in ('yes', 'true', 't', 'y', '1'):
+		return True
+	elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+		return False
+	else:
+		raise argparse.ArgumentTypeError('Boolean value expected.')
+
 parser = argparse.ArgumentParser(description='')
-parser.add_argument('--model', default='DCGAN', help='model to use [DCGAN, Text2Image]')
+parser.add_argument('--model', default='DCGAN', help='model to use [DCGAN, Text2Image, CycleGAN]')
 parser.add_argument('--nEpochs', type=int, default=25, help='# of epoch')
 parser.add_argument('--save_every_batch', type=int, default=30, 
 						help='Save Model/Samples every x iterations over batches(does not overwrite previously saved models)')
@@ -28,22 +37,22 @@ parser.add_argument('--output_nc', type=int, default=3, help='# of output image 
 parser.add_argument('--niter', type=int, default=200, help='# of iter at starting learning rate')
 parser.add_argument('--lr', type=float, default=0.0002, help='initial learning rate for adam')
 parser.add_argument('--beta1', type=float, default=0.5, help='momentum term of adam')
-parser.add_argument('--flip', type=bool, default=True, help='if flip the images for data argumentation')
+parser.add_argument('--flip', type=str2bool, default=True, help='if flip the images for data argumentation')
 parser.add_argument('--which_direction', default='AtoB', help='AtoB or BtoA')
 parser.add_argument('--phase', default='train', help='train, test')
 parser.add_argument('--save_latest_freq', type=int, default=5000, 
 						help='save the latest model every latest_freq sgd iterations (overwrites the previous latest model)')
-parser.add_argument('--continue_train', type=bool, default=False, 
+parser.add_argument('--continue_train', type=str2bool, default=False, 
 						help='if continue training, load the latest model: 1: true, 0: false')
-parser.add_argument('--serial_batches', type=bool, default=False, 
+parser.add_argument('--serial_batches', type=str2bool, default=False, 
 						help='f 1, takes images in order to make batches, otherwise takes them randomly')
-parser.add_argument('--serial_batch_iter', type=bool, default=True, help='iter into serial image list')
+parser.add_argument('--serial_batch_iter', type=str2bool, default=True, help='iter into serial image list')
 parser.add_argument('--checkpoint_dir', default='./checkpoint', help='models are saved here')
 parser.add_argument('--sample_dir', default='./samples', help='sample are saved here')
 parser.add_argument('--test_dir', default='./test', help='test sample are saved here')
 parser.add_argument('--L1_lambda', type=float, default=10.0, help='weight on L1 term in objective')
-parser.add_argument('--use_resnet', type=bool, default=True, help='generation network using reidule block')
-parser.add_argument('--use_lsgan', type=bool, default=True, help='gan loss defined in lsgan')
+parser.add_argument('--use_resnet', type=str2bool, default=True, help='generation network using reidule block')
+parser.add_argument('--use_lsgan', type=str2bool, default=True, help='gan loss defined in lsgan')
 parser.add_argument('--max_size', type=int, default=50, 
 						help='max size of image pool, 0 means do not use image pool')
 
@@ -63,8 +72,8 @@ parser.add_argument('--output_width', type=int, default=None, help="The size of 
 parser.add_argument('--dataset', default='celebA', help="The name of dataset [celebA, mnist, lsun, horse2zebra, mscoco, flowers]")
 parser.add_argument('--data_dir', type=str, default="data", help='Data Directory')
 parser.add_argument('--input_fname_pattern', default='*.jpg', help="Glob pattern of filename of input images [*]")
-parser.add_argument('--crop', type=bool, default=True, help="True for training, False for testing [False]")
-parser.add_argument('--visualize', type=bool,default=False, help="True for visualizing, False for nothing [False]")
+parser.add_argument('--crop', type=str2bool, default=True, help="True for training, False for testing [False]")
+parser.add_argument('--visualize', type=str2bool,default=False, help="True for visualizing, False for nothing [False]")
 #parser.add_argument('--', type=int, default=None, help="")
 
 args = parser.parse_args()
@@ -80,6 +89,7 @@ def main(_):
 		os.makedirs(args.checkpoint_dir)
 	if not os.path.exists(args.sample_dir):
 		os.makedirs(args.sample_dir)
+	
 
 	#gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.333)
 	run_config = tf.ConfigProto()
@@ -93,9 +103,9 @@ def main(_):
 			model = DCGAN( sess, args )
 		elif args.model == 'Text2Image':
 			model = Text2Image( sess, args )
-		elif args.model == 'cycleGAN':
-			model = cyclegan( sess, args )
-		else
+		elif args.model == 'CycleGAN':
+			model = CycleGAN( sess, args )
+		else:
 			raise Exception("undefined model")
 
 		show_all_variables()

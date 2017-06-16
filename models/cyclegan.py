@@ -13,33 +13,33 @@ from utils import *
 import pdb
 
 class CycleGAN(object):
-	def __init__(self, sess, args):
+	def __init__(self, sess, opts):
 		self.sess = sess
-		self.batch_size = args.batch_size
-		self.image_size = args.fine_size
-		self.input_c_dim = args.input_nc
-		self.output_c_dim = args.output_nc
-		self.L1_lambda = args.L1_lambda
-		self.dataset_dir = args.dataset_dir
+		self.batch_size = opts.batch_size
+		self.image_size = opts.fine_size
+		self.input_c_dim = opts.input_nc
+		self.output_c_dim = opts.output_nc
+		self.L1_lambda = opts.L1_lambda
+		self.dataset_dir = os.path.join( opts.data_dir, opts.dataset )
+		self.dataset = opts.dataset
 
 		self.discriminator = discriminator
-		if args.use_resnet:
+		if opts.use_resnet:
 			self.generator = generator_resnet
 		else:
 			self.generator = generator_unet
-		if args.use_lsgan:
+		if opts.use_lsgan:
 			self.criterionGAN = mae_criterion
 		else:
 			self.criterionGAN = sce_criterion
 
-		OPTIONS = namedtuple('OPTIONS', 'batch_size image_size \
-							  gf_dim df_dim output_c_dim')
-		self.options = OPTIONS._make((args.batch_size, args.fine_size,
-									  args.ngf, args.ndf, args.output_nc))
+		self.options = opts
+		self.options.image_size = opts.fine_size
+		self.options.output_c_dim = opts.output_nc
 
 		self._build_model()
 		self.saver = tf.train.Saver()
-		self.pool = ImagePool(args.max_size)
+		self.pool = ImagePool(opts.max_size)
 		print( "CycleGAN.__init__() done" )
 
 	def _build_model(self):
@@ -113,37 +113,40 @@ class CycleGAN(object):
 		self.g_vars_b2a = [var for var in t_vars if 'generatorB2A' in var.name]
 		for var in t_vars: print var.name
 
-	def train(self, args):
+	def train(self):
+		opts = self.options
 		"""Train CycleGAN"""
 		print( "building optimizers..." )
-		self.da_optim = tf.train.AdamOptimizer(args.lr, beta1=args.beta1) \
+		start_time = time.time()
+		self.da_optim = tf.train.AdamOptimizer(opts.lr, beta1=opts.beta1) \
 						.minimize(self.da_loss, var_list=self.da_vars)
-		self.db_optim = tf.train.AdamOptimizer(args.lr, beta1=args.beta1) \
+		self.db_optim = tf.train.AdamOptimizer(opts.lr, beta1=opts.beta1) \
 						.minimize(self.db_loss, var_list=self.db_vars)
-		self.g_a2b_optim = tf.train.AdamOptimizer(args.lr, beta1=args.beta1) \
+		self.g_a2b_optim = tf.train.AdamOptimizer(opts.lr, beta1=opts.beta1) \
 						.minimize(self.g_loss_a2b, var_list=self.g_vars_a2b)
-		self.g_b2a_optim = tf.train.AdamOptimizer(args.lr, beta1=args.beta1) \
+		self.g_b2a_optim = tf.train.AdamOptimizer(opts.lr, beta1=opts.beta1) \
 						.minimize(self.g_loss_b2a, var_list=self.g_vars_b2a)
 
 		init_op = tf.global_variables_initializer()
 		self.sess.run(init_op)
 		self.writer = tf.summary.FileWriter("./logs", self.sess.graph)
+		print( "built:{}sec".format(time.time()-start_time) )
 
 		counter = 1
 		start_time = time.time()
 
-		if self.load(args.checkpoint_dir):
+		if self.load(opts.checkpoint_dir):
 			print(" [*] Load SUCCESS")
 		else:
 			print(" [!] Load failed...")
 
 		print( "training..." )
-		for epoch in xrange(args.epoch):
-			dataA = glob('./datasets/{}/*.jpg'.format(self.dataset_dir+'/trainA'))
-			dataB = glob('./datasets/{}/*.jpg'.format(self.dataset_dir+'/trainB'))
+		for epoch in xrange(opts.nEpochs):
+			dataA = glob('./{}/*.jpg'.format(self.dataset_dir+'/trainA'))
+			dataB = glob('./{}/*.jpg'.format(self.dataset_dir+'/trainB'))
 			np.random.shuffle(dataA)
 			np.random.shuffle(dataB)
-			batch_idxs = min(min(len(dataA), len(dataB)), args.train_size) // self.batch_size
+			batch_idxs = min(min(len(dataA), len(dataB)), opts.train_size) // self.batch_size
 
 			for idx in xrange(0, batch_idxs):
 				batch_files = zip(dataA[idx*self.batch_size:(idx+1)*self.batch_size],
@@ -179,14 +182,14 @@ class CycleGAN(object):
 					% (epoch, idx, batch_idxs, time.time() - start_time))
 
 				if np.mod(counter, 100) == 1:
-					self.sample_model(args.sample_dir, epoch, idx)
+					self.sample_model(opts.sample_dir, epoch, idx)
 
 				if np.mod(counter, 1000) == 2:
-					self.save(args.checkpoint_dir, counter)
+					self.save(opts.checkpoint_dir, counter)
 
 	def save(self, checkpoint_dir, step):
 		model_name = "CycleGAN.model"
-		model_dir = "%s_%s" % (self.dataset_dir, self.image_size)
+		model_dir = "%s_%s" % (self.dataset, self.image_size)
 		checkpoint_dir = os.path.join(checkpoint_dir, model_dir)
 
 		if not os.path.exists(checkpoint_dir):
@@ -198,7 +201,7 @@ class CycleGAN(object):
 
 	def load(self, checkpoint_dir):
 
-		model_dir = "%s_%s" % (self.dataset_dir, self.image_size)
+		model_dir = "%s_%s" % (self.dataset, self.image_size)
 		checkpoint_dir = os.path.join(checkpoint_dir, model_dir)
 		print(" [*] Reading checkpoint from {}...".format(checkpoint_dir))
 
@@ -211,8 +214,8 @@ class CycleGAN(object):
 			return False
 
 	def sample_model(self, sample_dir, epoch, idx):
-		dataA = glob('./datasets/{}/*.jpg'.format(self.dataset_dir+'/testA'))
-		dataB = glob('./datasets/{}/*.jpg'.format(self.dataset_dir+'/testB'))
+		dataA = glob('./{}/*.jpg'.format(self.dataset_dir+'/testA'))
+		dataB = glob('./{}/*.jpg'.format(self.dataset_dir+'/testB'))
 		np.random.shuffle(dataA)
 		np.random.shuffle(dataB)
 		batch_files = zip(dataA[:self.batch_size], dataB[:self.batch_size])
@@ -228,18 +231,18 @@ class CycleGAN(object):
 		save_images(fake_B, [self.batch_size, 1],
 					'./{}/B_{:02d}_{:04d}.jpg'.format(sample_dir, epoch, idx))
 
-	def test(self, args):
+	def test(self, opts):
 		"""Test CycleGAN"""
 		init_op = tf.global_variables_initializer()
 		self.sess.run(init_op)
-		if args.which_direction == 'AtoB':
-			sample_files = glob('./datasets/{}/*.jpg'.format(self.dataset_dir+'/testA'))
-		elif args.which_direction == 'BtoA':
-			sample_files = glob('./datasets/{}/*.jpg'.format(self.dataset_dir+'/testB'))
+		if opts.which_direction == 'AtoB':
+			sample_files = glob('./{}/*.jpg'.format(self.dataset_dir+'/testA'))
+		elif opts.which_direction == 'BtoA':
+			sample_files = glob('./{}/*.jpg'.format(self.dataset_dir+'/testB'))
 		else:
 			raise Exception, '--which_direction must be AtoB or BtoA'
 
-		if self.load(args.checkpoint_dir):
+		if self.load(opts.checkpoint_dir):
 			print(" [*] Load SUCCESS")
 		else:
 			print(" [!] Load failed...")
@@ -248,11 +251,11 @@ class CycleGAN(object):
 			print 'Processing image: '+sample_file
 			sample_image = [load_test_data(sample_file)]
 			sample_image = np.array(sample_image).astype(np.float32)
-			if args.which_direction == 'AtoB':
+			if opts.which_direction == 'AtoB':
 				fake_B = self.sess.run(self.testB, feed_dict={self.test_A: sample_image})
 				save_images(fake_B, [1, 1], '{}/A2B_{}' \
-					.format(args.test_dir, sample_file.split('/')[-1]))
+					.format(opts.test_dir, sample_file.split('/')[-1]))
 			else:
 				fake_A = self.sess.run(self.testA, feed_dict={self.test_B: sample_image})
 				save_images(fake_A, [1, 1], '{}/B2A_{}' \
-					.format(args.test_dir, sample_file.split('/')[-1]))
+					.format(opts.test_dir, sample_file.split('/')[-1]))

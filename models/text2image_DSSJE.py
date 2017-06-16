@@ -4,10 +4,10 @@ import scipy
 import h5py
 import ops
 import os
+import glob
 from os.path import join
 import image_processing
 import random
-import shutil
 import pdb
 
 class Text2Image:
@@ -264,11 +264,12 @@ class Text2Image:
 					print( "Saving Images, Model" )
 					self.save_for_vis(real_images, gen, image_files)
 					self.save(self.checkpoint_dir, batch_no)
-			if i%5 == 0:
+			if i%5 == 0 or i==self.nEpochs-1:
 				self.save(self.checkpoint_dir, batch_no, note="epoch{}".format(i))
 	
 	def load_training_data(self, data_dir, dataset):
 		if dataset == 'flowers':
+			# load the result of "data_loader.py" (=flower_tv.hdf5)
 			data = h5py.File(join(data_dir, 'flower_tv.hdf5'))
 			flower_captions = {}
 			for ds in data.iteritems():
@@ -276,6 +277,20 @@ class Text2Image:
 			image_list = [key for key in flower_captions]
 			image_list.sort()
 	
+			# load reedscot_cvpr2016 encoded captions
+			data_icml_dir = join(data_dir,'flowers_caption_icml')
+			full_filenames = {}
+			classnames = os.listdir( data_icml_dir )
+			for classname in classnames:
+				if os.path.isdir( join(data_icml_dir,classname) ) :
+					filenames = glob.glob( join(data_icml_dir,classname,'*.npy') )
+					for filename in filenames:
+						full_filenames[os.path.basename(filename[0:-4])] = filename
+			flower_captions_reedscot = {}
+			for filename, npy in full_filenames.iteritems():
+				flower_captions_reedscot[filename] = np.load( npy )
+
+			# existing code
 			img_75 = int(len(image_list)*0.75)
 			training_image_list = image_list[0:img_75]
 			random.shuffle(training_image_list)
@@ -308,7 +323,6 @@ class Text2Image:
 
 	def save_for_vis(self, real_images, generated_images, image_files):
 		sample_dir = join(self.sample_dir, 'text2image')
-#		shutil.rmtree( sample_dir )
 		if not os.path.exists( sample_dir ):
 			os.makedirs( sample_dir )
 	
