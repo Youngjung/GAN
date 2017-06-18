@@ -4,6 +4,7 @@ import scipy
 import h5py
 import ops
 import os
+import glob
 from os.path import join
 import image_processing
 import random
@@ -23,12 +24,27 @@ class Text2Image:
 	batch_size : Batch Size 64
 	'''
 	def __init__(self, sess, options):
+		self.textEncoder = options.textEncoder
 		self.sess = sess
 		self.model = options.model
 		self.image_size = options.input_height
 		self.batch_size = options.batch_size
 		self.z_dim = options.z_dim
-		self.caption_vector_length = options.caption_vector_length
+		if options.caption_vector_length is not None:
+			self.caption_vector_length = options.caption_vector_length
+		else:
+			if options.textEncoder == 'skipthought':
+				self.caption_vector_length = 2400
+			elif options.textEncoder == 'DSSJE':
+				self.caption_vector_length = 1024
+			else:
+				raise ValueError('unknown text encoder')
+		if options.textEncoder == 'skipthought':
+			self.nCapsPerImage = 5
+		elif options.textEncoder == 'DSSJE':
+			self.nCapsPerImage = 10
+		else:
+			raise ValueError('unknown text encoder')
 		self.t_dim = options.t_dim
 		self.gf_dim = options.gf_dim
 		self.df_dim = options.df_dim
@@ -42,7 +58,6 @@ class Text2Image:
 		self.data_dir = options.data_dir
 		self.save_every_batch = options.save_every_batch
 		self.sample_dir = options.sample_dir
-#		self. = options.
 
 		self.g_bn0 = ops.batch_norm(name='g_bn0')
 		self.g_bn1 = ops.batch_norm(name='g_bn1')
@@ -269,17 +284,35 @@ class Text2Image:
 	
 	def load_training_data(self, data_dir, dataset):
 		if dataset == 'flowers':
+			print( 'loading skipthought...' )
 			data = h5py.File(join(data_dir, 'flower_tv.hdf5'))
 			flower_captions = {}
 			for ds in data.iteritems():
 				flower_captions[ds[0]] = np.array(ds[1])
-			image_list = [key for key in flower_captions]
+			image_list = [key.encode('ascii','ignore') for key in flower_captions]
 			image_list.sort()
 	
 			img_75 = int(len(image_list)*0.75)
 			training_image_list = image_list[0:img_75]
 			random.shuffle(training_image_list)
+
+			# load reedscot_cvpr2016 encoded captions if specified
+			if self.textEncoder == 'DSSJE':
+				print( 'loading DSSJE...' )
+				data_icml_dir = join(data_dir,'flowers_caption_icml')
+				full_filenames = {}
+				classnames = os.listdir( data_icml_dir )
+				for classname in classnames:
+					if os.path.isdir( join(data_icml_dir,classname) ) :
+						filenames = glob.glob( join(data_icml_dir,classname,'*.npy') )
+						for filename in filenames:
+							full_filenames[os.path.basename(filename[0:-4])+'.jpg'] = filename
+				flower_captions_reedscot = {}
+				for filename, npy in full_filenames.iteritems():
+					flower_captions_reedscot[filename] = np.load( npy )
+				flower_captions = flower_captions_reedscot
 	
+
 			return {
 				'image_list' : training_image_list,
 				'captions' : flower_captions,
@@ -307,7 +340,7 @@ class Text2Image:
 
 
 	def save_for_vis(self, real_images, generated_images, image_files):
-		sample_dir = join(self.sample_dir, 'text2image')
+		sample_dir = join(self.sample_dir, 'text2image_'+self.textEncoder)
 #		shutil.rmtree( sample_dir )
 		if not os.path.exists( sample_dir ):
 			os.makedirs( sample_dir )
@@ -373,7 +406,7 @@ class Text2Image:
 				wrong_image_array = image_processing.load_image_array(wrong_image_file, image_size)
 				wrong_images[cnt, :,:,:] = wrong_image_array
 	
-				random_caption = random.randint(0,4)
+				random_caption = random.randint(0,self.nCapsPerImage-1) # randint arguments are inclusive
 				captions[cnt,:] = loaded_data['captions'][ loaded_data['image_list'][idx] ][ random_caption ][0:caption_vector_length]
 				image_files.append( image_file )
 				cnt += 1
