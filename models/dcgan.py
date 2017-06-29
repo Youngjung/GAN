@@ -30,6 +30,7 @@ class DCGAN(object):
 			c_dim: (optional) Dimension of image color. For grayscale input, set to 1. [3]
 		"""
 		self.sess = sess
+		self.opts = options
 		self.model = options.model
 		self.crop = options.crop
 
@@ -147,10 +148,12 @@ class DCGAN(object):
 
 		self.saver = tf.train.Saver()
 
-	def train(self, config):
-		d_optim = tf.train.AdamOptimizer(config.lr, beta1=config.beta1) \
+	def train(self):
+		opts = self.opts
+		pdb.set_trace()
+		d_optim = tf.train.AdamOptimizer(opts.lr, beta1=opts.beta1) \
 							.minimize(self.d_loss, var_list=self.d_vars)
-		g_optim = tf.train.AdamOptimizer(config.lr, beta1=config.beta1) \
+		g_optim = tf.train.AdamOptimizer(opts.lr, beta1=opts.beta1) \
 							.minimize(self.g_loss, var_list=self.g_vars)
 		try:
 			tf.global_variables_initializer().run()
@@ -163,7 +166,7 @@ class DCGAN(object):
 
 		sample_z = np.random.uniform(-1, 1, size=(self.sample_num , self.z_dim))
 		
-		if config.dataset == 'mnist':
+		if opts.dataset == 'mnist':
 			sample_inputs = self.data_X[0:self.sample_num]
 			sample_labels = self.data_y[0:self.sample_num]
 		else:
@@ -190,20 +193,20 @@ class DCGAN(object):
 		else:
 			print(" [!] Load failed...")
 
-		for epoch in xrange(config.nEpochs):
-			if config.dataset == 'mnist':
-				batch_idxs = min(len(self.data_X), config.train_size) // config.batch_size
+		for epoch in xrange(opts.nEpochs):
+			if opts.dataset == 'mnist':
+				batch_idxs = min(len(self.data_X), opts.train_size) // opts.batch_size
 			else:			
 				self.data = glob(os.path.join(
-					"./data", config.dataset, self.input_fname_pattern))
-				batch_idxs = min(len(self.data), config.train_size) // config.batch_size
+					"./data", opts.dataset, self.input_fname_pattern))
+				batch_idxs = min(len(self.data), opts.train_size) // opts.batch_size
 
 			for idx in xrange(0, batch_idxs):
-				if config.dataset == 'mnist':
-					batch_images = self.data_X[idx*config.batch_size:(idx+1)*config.batch_size]
-					batch_labels = self.data_y[idx*config.batch_size:(idx+1)*config.batch_size]
+				if opts.dataset == 'mnist':
+					batch_images = self.data_X[idx*opts.batch_size:(idx+1)*opts.batch_size]
+					batch_labels = self.data_y[idx*opts.batch_size:(idx+1)*opts.batch_size]
 				else:
-					batch_files = self.data[idx*config.batch_size:(idx+1)*config.batch_size]
+					batch_files = self.data[idx*opts.batch_size:(idx+1)*opts.batch_size]
 					batch = [
 							get_image(batch_file,
 												input_height=self.input_height,
@@ -217,10 +220,10 @@ class DCGAN(object):
 					else:
 						batch_images = np.array(batch).astype(np.float32)
 
-				batch_z = np.random.uniform(-1, 1, [config.batch_size, self.z_dim]) \
+				batch_z = np.random.uniform(-1, 1, [opts.batch_size, self.z_dim]) \
 							.astype(np.float32)
 
-				if config.dataset == 'mnist':
+				if opts.dataset == 'mnist':
 					# Update D network
 					_, summary_str = self.sess.run([d_optim, self.d_sum],
 						feed_dict={ 
@@ -282,7 +285,7 @@ class DCGAN(object):
 						time.time() - start_time, errD_fake+errD_real, errG))
 
 				if np.mod(counter, 100) == 1:
-					if config.dataset == 'mnist':
+					if opts.dataset == 'mnist':
 						samples, d_loss, g_loss = self.sess.run(
 							[self.sampler, self.d_loss, self.g_loss],
 							feed_dict={
@@ -294,7 +297,7 @@ class DCGAN(object):
 						manifold_h = int(np.ceil(np.sqrt(samples.shape[0])))
 						manifold_w = int(np.floor(np.sqrt(samples.shape[0])))
 						save_images(samples, [manifold_h, manifold_w],
-									'./{}/train_{:02d}_{:04d}.png'.format(config.sample_dir, epoch, idx))
+									'./{}/train_{:02d}_{:04d}.png'.format(opts.sample_dir, epoch, idx))
 						print("[Sample] d_loss: %.8f, g_loss: %.8f" % (d_loss, g_loss)) 
 					else:
 						try:
@@ -308,13 +311,13 @@ class DCGAN(object):
 							manifold_h = int(np.ceil(np.sqrt(samples.shape[0])))
 							manifold_w = int(np.floor(np.sqrt(samples.shape[0])))
 							save_images(samples, [manifold_h, manifold_w],
-										'./{}/train_{:02d}_{:04d}.png'.format(config.sample_dir, epoch, idx))
+										'./{}/train_{:02d}_{:04d}.png'.format(opts.sample_dir,epoch, idx))
 							print("[Sample] d_loss: %.8f, g_loss: %.8f" % (d_loss, g_loss)) 
 						except:
 							print("one pic error!...")
 
 				if np.mod(counter, 500) == 2:
-					self.save(config.checkpoint_dir, counter)
+					self.save(opts.checkpoint_dir, counter)
 
 	def discriminator(self, image, y=None, reuse=False):
 		with tf.variable_scope("discriminator") as scope:

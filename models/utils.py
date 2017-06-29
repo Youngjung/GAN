@@ -341,7 +341,7 @@ def log( epoch, batch, nBatches, lossnames, losses, elapsed=None, filelogger=Non
 
 	m,s = divmod( elapsed, 60 )
 	h,m = divmod( m,60 )
-	timestamp = "{:2}:{:2}:{:2}".format( h,m,s )
+	timestamp = "{:2}:{:02}:{:02}".format( int(h),int(m),int(s) )
 	log = "epoch {} batch {:>nDigits}/{} {} ({})=({})".format( epoch, batch, nBatches, timestamp, str_lossnames, str_losses )
 	print( log )
 	if filelogger:

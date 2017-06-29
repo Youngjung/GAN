@@ -1,5 +1,6 @@
 import argparse
 import os
+from os.path import join
 import scipy.misc
 import numpy as np
 import pdb
@@ -7,7 +8,8 @@ import pdb
 from models.dcgan import DCGAN
 from models.text2image import Text2Image
 from models.cyclegan import CycleGAN
-from models.utils import pp, visualize, to_json, show_all_variables
+from models.textgan import TextGAN
+from models.utils import visualize, show_all_variables
 
 import tensorflow as tf
 
@@ -27,6 +29,7 @@ def main(opts):
 
 	if not os.path.exists(opts.checkpoint_dir):
 		os.makedirs(opts.checkpoint_dir)
+	opts.sample_dir = join( opts.sample_dir, opts.model )
 	if not os.path.exists(opts.sample_dir):
 		os.makedirs(opts.sample_dir)
 	
@@ -45,6 +48,8 @@ def main(opts):
 			model = Text2Image( sess, opts )
 		elif opts.model == 'CycleGAN':
 			model = CycleGAN( sess, opts )
+		elif opts.model == 'TextGAN':
+			model = TextGAN( sess, opts )
 		else:
 			raise Exception("undefined model")
 
@@ -63,7 +68,7 @@ def main(opts):
 	
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser(description='')
-	parser.add_argument('--model', default='DCGAN', help='model to use [DCGAN, Text2Image, CycleGAN]')
+	parser.add_argument('--model', default='DCGAN', help='model to use [DCGAN, Text2Image, CycleGAN, TextGAN]')
 	parser.add_argument('--nEpochs', type=int, default=25, help='# of epoch')
 	parser.add_argument('--save_every_batch', type=int, default=30, 
 							help='Save Model/Samples every x iterations over batches(does not overwrite previously saved models)')

@@ -226,6 +226,10 @@ class CycleGAN(object):
 			[self.fake_A, self.fake_B],
 			feed_dict={self.real_data: sample_images}
 		)
+		save_images(sample_images[:,:,:,0:3], [self.batch_size, 1],
+					'./{}/A_{:02d}_{:04d}_real.jpg'.format(sample_dir, epoch, idx))
+		save_images(sample_images[:,:,:,3:6], [self.batch_size, 1],
+					'./{}/B_{:02d}_{:04d}_real.jpg'.format(sample_dir, epoch, idx))
 		save_images(fake_A, [self.batch_size, 1],
 					'./{}/A_{:02d}_{:04d}.jpg'.format(sample_dir, epoch, idx))
 		save_images(fake_B, [self.batch_size, 1],
