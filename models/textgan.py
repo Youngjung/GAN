@@ -13,72 +13,90 @@ from data_loader import create_dataloader
 
 import pdb
 
-def generator(z, opts, initializer):
-	lstm_cell = tf.contrib.rnn.BasicLSTMCell( num_units=opts.num_lstm_units )
-	if opts.phase == 'train':
-		lstm_cell = tf.contrib.rnn.DropoutWrapper( lstm_cell,
-													input_keep_prob=opts.lstm_dropout_keep_prob,
-													output_keep_prob=opts.lstm_dropout_keep_prob )
+def GRUcell( num_units, isTrain=False, dropout_keep_ratio=0.5 ):
+	gru_cell = tf.contrib.rnn.GRUCell( num_units )
+	if isTrain:
+		gru_cell = tf.contrib.rnn.DropoutWrapper( gru_cell, 
+													input_keep_prob=dropout_keep_ratio,
+													output_keep_prob=dropout_keep_ratio )
+	return gru_cell
+
+# network for sequence generation
+# ref: ptb_word_lm.py from tutorial rnn, line 104-200
+def generator(z, vocab_size, opts):
 	with tf.variable_scope("generator") as scope:
-		zero_state = lstm_cell.zero_state( batch_size=opts.batch_size, dtype=tf.float32 )
-		_, initial_state = lstm_cell( z, zero_state )
+		# make 2-layer gru
+		stacked_gru = tf.contrib.rnn.MultiRNNCell(
+					[GRUcell(opts.gru_num_units) for _ in range(opts.gru_num_layers)], state_is_tuple=True )
 
-		scope.reuse_variables()
+		# feed z
+		z_fc = linear( z, opts.gru_num_units, scope )
+		zero_state = stacked_gru.zero_state( batch_size=opts.batch_size, dtype=tf.float32 )
+		cell_output, initial_state = stacked_gru( z_fc, zero_state )
 
-		if opts.phase == 'test':
-			tf.concat( axis=1, values=initial_state, name='initial_state' )
-			state_feed = tf.placeholder( dtype=tf.float32,
-										shape = [None, sum(lstsm_cell.state_size)],
-										name='state_feed')
-			state_tuple = tf.split( state_feed, 2, 1 )
-
-			lstm_outputs, state_tuple = lstm_cell( tf.squeeze( z, axis=[1] ), state=state_tuple )
-
-			tf.concat( axis=1, values=state_tuple, name='state' )
-		else:
-			lstm_outputs, _ = tf.nn.dynamic_rnn( cell=lstm_cell,
-												inputs=z,
-												sequence_length=opts.sequence_length,
-												initial_state=initial_state,
-												dtype=tf.float32,
-												scope=scope )
-
-		lstm_outputs = tf.reshape( lstm_outputs, [-1, lstm_cell.output_size] )
+		# manual unrolling 
+		state = initial_state
+		gru_outputs = []
+		for time_step in range(opts.sequence_length):
+			cell_output, state = stacked_gru( cell_output, state )
+			gru_outputs.append( cell_output )
+			
+		gru_outputs_reshape = tf.reshape( gru_outputs, [-1, stacked_gru.output_size] )
 
 		with tf.variable_scope('logits') as scope_logits:
-			logits = tf.contrib.layers.fully_connected( lstm_outputs,
-														num_outputs = opts.vocab_size,
-														activation_fn = None,
-														weights_initializer = initializer,
-														scope = scope_logits )
-		if opts.phase == 'test':
-			return tf.nn.softmax( logits, name='softmax' )
-		return tf.nn.tanh(h4)
+			logits = linear( gru_outputs_reshape, vocab_size, scope_logits )
 
-def discriminator(self, text, reuse=False):
-	opts = self.opts
+		# sample text from logits
+		words = tf.nn.softmax( logits )
+		words = tf.to_int32( words )
+		#words = tf.multinomial( logits,1 )
+		words = tf.reshape( words, [opts.batch_size, -1] )
+
+		return words
+
+# network for sequence classification
+# ref: https://danijar.com/introduction-to-recurrent-networks-in-tensorflow/
+def discriminator(text, vocab_size, opts, reuse=False):
 	with tf.variable_scope("discriminator") as scope:
 		if reuse:
 			scope.reuse_variables()
 
-		GRU_cell1 = tf.contrib.rnn.GRUCell( num_units=self.opts.num_rnn_units )
-		GRU_cell2 = tf.contrib.rnn.GRUCell( num_units=self.opts.num_rnn_units )
+#		# represent text as one-hot
+#		text = tf.one_hot( text, vocab_size, 1., 0. )
+#
+#		# reshape and embedding and back
+#		text_reshaped = tf.reshape( text, [-1, vocab_size] )
+#		with tf.variable_scope('embedding') as scope_embedding:
+#			embedded_to_be_reshaped = linear( text_reshaped, opts.gru_num_units, scope_embedding )
+#		embedded = tf.reshape( embedded_to_be_reshaped, [opts.batch_size, -1, opts.gru_num_units] )
 
-		if opts.phase == 'train':
-			GRU_cell1 = tf.contrib.rnn.DropoutWrapper( GRU_cell1, input_keep_prob=0.5, output_keep_prob=0.5 )
-			GRU_cell2 = tf.contrib.rnn.DropoutWrapper( GRU_cell2, input_keep_prob=0.5, output_keep_prob=0.5 )
+		# embedding
+		with tf.variable_scope("embedding") as scope_embedding:
+			embedding_map = tf.get_variable( "map", [vocab_size,opts.gru_num_units] )
+			text_embedded = tf.nn.embedding_lookup( embedding_map, text )
 
-		zero_state = GRU_cell1.zero_state( batch_size=opts.batch_size, dtype=tf.float32)
-		_, initial_state = GRU_cell1( subject_text, zero_state )
+		# make 2-layer gru
+		stacked_gru = tf.contrib.rnn.MultiRNNCell(
+						[GRUcell(opts.gru_num_units,True) for _ in range(opts.gru_num_layers)])
 
-		h0 = tf.nn.dynamic_rnn( cell=GRU_cell1,
-									inputs=subject_Text, 
-									sequence_length=?, 
-									initial_state=initial_state,
-									dtype=tf.float32,
-									scope=lstm_scope)
+		# unroll -> opts.sequence_length
+		zero_state = stacked_gru.zero_state( batch_size=opts.batch_size, dtype=tf.float32 )
+		gru_outputs, _ = tf.nn.dynamic_rnn( cell=stacked_gru,
+											inputs=text_embedded,
+											#sequence_length=opts.sequence_length,
+											initial_state=zero_state,
+											dtype=tf.float32,
+											scope=scope )
 
-		return tf.nn.sigmoid(h4), h4
+		# get last output
+		gru_outputs = tf.transpose( gru_outputs, [1,0,2] )
+		gru_last_output = tf.gather( gru_outputs, int(gru_outputs.get_shape()[0])-1 )
+		
+		# fully connected
+		with tf.variable_scope('logits') as scope_logits:
+			logits = linear( gru_last_output, 2, scope_logits )
+
+		return tf.nn.sigmoid(logits), logits
 	
 class TextGAN(object):
 	def __init__(self, sess, opts):
@@ -98,21 +116,27 @@ class TextGAN(object):
 
 	def build_model(self):
 		opts = self.opts
+		vocab_size = self.data_loader.vocab_size
 
-		t_z = tf.placeholder(tf.float32, [None, opts.z_dim], name='z')
-		t_realText = tf.placeholder(tf.float32, [opts.batch_size] + image_dims, name='real_images')
+		# t_z = [batch_size X z_dim], latent noise
+		# t_realText = [batch_size X sequence_length], each row has word_ids
+		t_z = tf.placeholder(tf.float32, [opts.batch_size, opts.z_dim], name='z')
+		t_realText = tf.placeholder(tf.int32, [opts.batch_size, opts.sequence_length], name='real_text')
 		
-		t_fakeText = self.generator( t_z )
-		t_D_fake, t_D_fake_logits = self.discriminator( t_fakeText )
-		t_D_real, t_D_real_logits = self.discriminator( t_realText, reuse=True)
+		t_fakeText = generator( t_z, vocab_size, opts )
+		t_D_fake, t_D_fake_logits = discriminator( t_fakeText, vocab_size, opts )
+		t_D_real, t_D_real_logits = discriminator( t_realText, vocab_size, opts, reuse=True)
 
-		g_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(t_D_fake_logits, tf.ones_like(t_D_fake)))
+		g_loss      = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
+											logits=t_D_fake_logits, labels=tf.ones_like(t_D_fake)))
 
-		d_loss_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(t_D_real_logits, tf.oness_like(t_D_real)))
-		d_loss_fake = tf.reduce_mean(sigmoid_cross_entropy_with_logits(t_D_fake_logits, tf.zeros_like(t_D_fake)))
+		d_loss_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
+											logits=t_D_real_logits, labels=tf.ones_like(t_D_real)))
+		d_loss_fake = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
+											logits=t_D_fake_logits, labels=tf.zeros_like(t_D_fake)))
 		d_loss = d_loss_real + d_loss_fake
 
-		summary = []
+		summary = {}
 		summary['g_loss'] = tf.summary.scalar("g_loss", g_loss)
 		summary['d_loss_real'] = tf.summary.scalar("d_loss_real", d_loss_real)
 		summary['d_loss_fake'] = tf.summary.scalar("d_loss_fake", d_loss_fake)
@@ -121,12 +145,14 @@ class TextGAN(object):
 		self.saver = tf.train.Saver()
 
 		t_vars = tf.trainable_variables()
-		g_vars = [var for var in t_vars if 'g_' in var.name]
-		d_vars = [var for var in t_vars if 'd_' in var.name]
+		g_vars = [var for var in t_vars if 'generator' in var.name]
+		d_vars = [var for var in t_vars if 'discriminator' in var.name]
 
 		self.input_tensors = { 't_z' : t_z,
 							't_realText' : t_realText }
 
+		#self.variables = { 'g_vars' : g_vars,
+		#				'd_vars' : d_vars }
 		self.variables = { 'g_vars' : g_vars,
 						'd_vars' : d_vars }
 
@@ -138,37 +164,6 @@ class TextGAN(object):
 		self.summary = summary
 
 		
-	@property
-	def model_dir(self):
-		return "{}_{}_{}_{}_{}".format( self.model, self.dataset, self.batch_size, self.output_height, self.output_width)
-			
-	def save(self, checkpoint_dir, step):
-		model_name = "DCGAN.model"
-		checkpoint_dir = os.path.join(checkpoint_dir, self.model_dir)
-
-		if not os.path.exists(checkpoint_dir):
-			os.makedirs(checkpoint_dir)
-
-		self.saver.save(self.sess,
-						os.path.join(checkpoint_dir, model_name),
-						global_step=step)
-
-	def load(self, checkpoint_dir):
-		import re
-		print(" [*] Reading checkpoints...")
-		checkpoint_dir = os.path.join(checkpoint_dir, self.model_dir)
-
-		ckpt = tf.train.get_checkpoint_state(checkpoint_dir)
-		if ckpt and ckpt.model_checkpoint_path:
-			ckpt_name = os.path.basename(ckpt.model_checkpoint_path)
-			self.saver.restore(self.sess, os.path.join(checkpoint_dir, ckpt_name))
-			counter = int(next(re.finditer("(\d+)(?!.*\d)",ckpt_name)).group(0))
-			print(" [*] Success to read {}".format(ckpt_name))
-			return True, counter
-		else:
-			print(" [*] Failed to find a checkpoint")
-			return False, 0
-
 	def train(self):
 		opts = self.opts
 		input_tensors = self.input_tensors
@@ -179,12 +174,13 @@ class TextGAN(object):
 
 		d_optim = tf.train.AdamOptimizer(opts.lr, beta1=opts.beta1) \
 							.minimize(loss['d_loss'], var_list=variables['d_vars'])
+		self.summaryWriter = tf.summary.FileWriter("./logs", self.sess.graph)
+		pdb.set_trace()
 		g_optim = tf.train.AdamOptimizer(opts.lr, beta1=opts.beta1) \
 							.minimize(loss['g_loss'], var_list=variables['g_vars'])
 		tf.global_variables_initializer().run()
 
 		d_sum = tf.summary.merge([summary['d_loss'], summary['d_loss_real'], summary['d_loss_fake']])
-		self.summaryWriter = tf.summary.FileWriter("./logs", self.sess.graph)
 
 		sample_z = np.random.uniform(-1, 1, size=(opts.sample_num , opts.z_dim))
 		
@@ -199,7 +195,7 @@ class TextGAN(object):
 			real_text, z_noise = self.data_loader.get_batch()
 
 			# Update D network
-			_, summary_str = self.sess.run([d_optim, d_sum]],
+			_, summary_str = self.sess.run([d_optim, d_sum],
 				feed_dict={ 
 					input_tensors['t_z'] : z_noise,
 					input_tensors['t_realText'] : real_text
@@ -256,5 +252,36 @@ class TextGAN(object):
 				print("[Sample] d_loss: %.8f, g_loss: %.8f" % (d_loss, g_loss)) 
 			if np.mod(counter, 500) == 2:
 				self.save(opts.checkpoint_dir, counter)
+
+	@property
+	def model_dir(self):
+		return "{}_{}_{}_{}_{}".format( self.model, self.dataset, self.batch_size, self.output_height, self.output_width)
+			
+	def save(self, checkpoint_dir, step):
+		model_name = "DCGAN.model"
+		checkpoint_dir = os.path.join(checkpoint_dir, self.model_dir)
+
+		if not os.path.exists(checkpoint_dir):
+			os.makedirs(checkpoint_dir)
+
+		self.saver.save(self.sess,
+						os.path.join(checkpoint_dir, model_name),
+						global_step=step)
+
+	def load(self, checkpoint_dir):
+		import re
+		print(" [*] Reading checkpoints...")
+		checkpoint_dir = os.path.join(checkpoint_dir, self.model_dir)
+
+		ckpt = tf.train.get_checkpoint_state(checkpoint_dir)
+		if ckpt and ckpt.model_checkpoint_path:
+			ckpt_name = os.path.basename(ckpt.model_checkpoint_path)
+			self.saver.restore(self.sess, os.path.join(checkpoint_dir, ckpt_name))
+			counter = int(next(re.finditer("(\d+)(?!.*\d)",ckpt_name)).group(0))
+			print(" [*] Success to read {}".format(ckpt_name))
+			return True, counter
+		else:
+			print(" [*] Failed to find a checkpoint")
+			return False, 0
 
 

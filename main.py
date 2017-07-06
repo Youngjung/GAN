@@ -126,6 +126,12 @@ if __name__ == '__main__':
 	parser.add_argument('--textEncoder', type=str, default='skipthought', help="skipthought / DSSJE")
 	#parser.add_argument('--', type=int, default=None, help="")
 	
+	# for textGAN
+	parser.add_argument('--gru_num_units', type=int, default=256, help="")
+	parser.add_argument('--gru_num_layers', type=int, default=2, help="")
+	parser.add_argument('--sequence_length', type=int, default=30, help="")
+
+
 	args = parser.parse_args()
 	main( args )
 
