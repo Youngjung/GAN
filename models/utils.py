@@ -325,7 +325,7 @@ def preprocess_A_and_B(img_A, img_B, load_size=286, fine_size=256, flip=True, is
 #	added by Youngjung
 ##########################
 
-def log( epoch, batch, nBatches, lossnames, losses, elapsed=None, filelogger=None ):
+def log( epoch, batch, nBatches, lossnames, losses, elapsed, filelogger=None ):
 	nDigits = len(str(nBatches))
 	str_lossnames = ""
 	str_losses = ""
@@ -336,13 +336,13 @@ def log( epoch, batch, nBatches, lossnames, losses, elapsed=None, filelogger=Non
 			str_lossnames += ','
 			str_losses += ', '
 		str_lossnames += lossname
-		str_losses += '{:.2f}'
-		isFirst = True
+		str_losses += '{:.2f}'.format(loss)
+		isFirst = False
 
 	m,s = divmod( elapsed, 60 )
 	h,m = divmod( m,60 )
 	timestamp = "{:2}:{:02}:{:02}".format( int(h),int(m),int(s) )
-	log = "epoch {} batch {:>nDigits}/{} {} ({})=({})".format( epoch, batch, nBatches, timestamp, str_lossnames, str_losses )
+	log = "{} epoch {} batch {:>{}}/{} ({})=({})".format( timestamp, epoch, batch, nDigits, nBatches, str_lossnames, str_losses )
 	print( log )
 	if filelogger:
 		filelogger.write( log )
