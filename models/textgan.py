@@ -118,8 +118,6 @@ class TextGAN(object):
 		"""
 		self.sess = sess
 		self.opts = opts
-		self.model = opts.model
-		self.batch_size = opts.batch_size
 
 		self.data_loader = create_dataloader(opts)
 		self.build_model()
@@ -138,6 +136,8 @@ class TextGAN(object):
 
 		t_D_free, t_D_free_logits = discriminator( t_freeBehavior, opts )
 		t_D_teacher, t_D_teacher_logits = discriminator( t_teacherBehavior, opts, reuse=True)
+
+		t_freeText = tf.argmax( tf.nn.softmax( t_freeBehavior[0] ), axis=2 )
 
 		loss_NLL = NLLlossForBehavior( t_teacherBehavior, t_realText, vocab_size )
 		loss_fool = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
@@ -167,15 +167,15 @@ class TextGAN(object):
 		self.input_tensors = { 't_z' : t_z,
 							't_realText' : t_realText }
 
-		#self.variables = { 'g_vars' : g_vars,
-		#				'd_vars' : d_vars }
 		self.variables = { 'g_vars' : g_vars,
 						'd_vars' : d_vars }
 
 		self.loss = { 'g_loss' : g_loss,
+					'g_loss_NLL' : loss_NLL,
 					'd_loss' : d_loss }
 
-		self.outputs = { 'G' : t_freeBehavior}
+		self.outputs = { 'G' : t_freeBehavior,
+						'freeText': t_freeText }
 
 		self.summary = summary
 
@@ -196,8 +196,9 @@ class TextGAN(object):
 		tf.global_variables_initializer().run()
 
 		d_sum = tf.summary.merge([summary['d_loss'], summary['d_loss_free'], summary['d_loss_teacher']])
+		g_sum = tf.summary.merge([summary['g_loss'], summary['g_loss_NLL'], summary['g_loss_fool']])
 
-		sample_z = np.random.uniform(-1, 1, size=(opts.sample_num , opts.z_dim))
+		sample_z = np.random.uniform(-1, 1, size=(opts.batch_size, opts.z_dim))
 		
 		counter = 1
 		start_time = time.time()
@@ -205,72 +206,76 @@ class TextGAN(object):
 		if could_load:
 			counter = checkpoint_counter
 
-		for epoch in xrange(opts.nEpochs):
-			batch_idxs = min(len(self.data), opts.train_size) // opts.batch_size
-			real_text, z_noise = self.data_loader.get_batch()
+		f_valid = open('valid.txt','w')
+		lossnames_to_print = ['g_loss', 'd_loss']
+		for epoch in range(opts.nEpochs):
+			nBatches = self.data_loader.nSamples['train'] // opts.batch_size
 
-			# Update D network
-			_, summary_str = self.sess.run([d_optim, d_sum],
-				feed_dict={ 
-					input_tensors['t_z'] : z_noise,
-					input_tensors['t_realText'] : real_text
-				})
-			self.writer.add_summary(summary_str, counter)
-
-			# Update G network
-			_, summary_str = self.sess.run([g_optim, summary['g_loss']],
-				feed_dict={
-					self.t_z: batch_z, 
-				})
-			self.writer.add_summary(summary_str, counter)
-
-			# Run g_optim twice to make sure that d_loss does not go to zero (different from paper)
-			_, summary_str = self.sess.run([g_optim, summary['g_loss']],
-				feed_dict={
-					self.t_z: batch_z, 
-				})
-			self.writer.add_summary(summary_str, counter)
-
-
-			errD_fake = self.d_loss_fake.eval({
-					self.t_z: batch_z, 
-					self.t_y:batch_labels
-			})
-			errD_real = self.d_loss_real.eval({
-					self.inputs: batch_images,
-					self.t_y:batch_labels
-			})
-			errG = self.g_loss.eval({
-					self.t_z: batch_z,
-					self.t_y: batch_labels
-			})
-
-			counter += 1
-			if idx % self.print_every==0:
-				print("Epoch: [%2d] [%4d/%4d] time: %4.4f, d_loss: %.8f, g_loss: %.8f" \
-				% (epoch, idx, batch_idxs,
-					time.time() - start_time, errD_fake+errD_real, errG))
-
-			if np.mod(counter, 100) == 1:
-				samples, d_loss, g_loss = self.sess.run(
-					[self.sampler, self.d_loss, self.g_loss],
+			for batch_idx in range(nBatches):
+				real_text = self.data_loader.get_batch_text(batch_idx, opts.sequence_length)
+				z_noise = np.random.uniform(-1,1, [opts.batch_size, opts.z_dim] )
+	
+				# Update D network
+				_, d_loss, summary_str = self.sess.run([d_optim, loss['d_loss'], d_sum],
+					feed_dict={ 
+						input_tensors['t_z'] : z_noise,
+						input_tensors['t_realText'] : real_text
+					})
+				self.summaryWriter.add_summary(summary_str, counter)
+	
+				# Update G network
+				_, g_loss, summary_str = self.sess.run([g_optim, loss['g_loss'], g_sum],
 					feed_dict={
-							self.t_z: sample_z,
-							self.inputs: sample_inputs,
-							self.t_y:sample_labels,
-					}
-				)
-				manifold_h = int(np.ceil(np.sqrt(samples.shape[0])))
-				manifold_w = int(np.floor(np.sqrt(samples.shape[0])))
-				save_images(samples, [manifold_h, manifold_w],
-							'./{}/train_{:02d}_{:04d}.png'.format(opts.sample_dir, epoch, idx))
-				print("[Sample] d_loss: %.8f, g_loss: %.8f" % (d_loss, g_loss)) 
-			if np.mod(counter, 500) == 2:
-				self.save(opts.checkpoint_dir, counter)
+						input_tensors['t_z'] : z_noise,
+						input_tensors['t_realText'] : real_text
+					})
+				self.summaryWriter.add_summary(summary_str, counter)
+	
+				# Run g_optim twice to make sure that d_loss does not go to zero (different from paper)
+				_, g_loss, summary_str = self.sess.run([g_optim, loss['g_loss'], g_sum],
+					feed_dict={
+						input_tensors['t_z'] : z_noise,
+						input_tensors['t_realText'] : real_text
+					})
+				self.summaryWriter.add_summary(summary_str, counter)
+	
+	
+				counter += 1
+				if counter % opts.print_every==0:
+					elapsed = time.time() - start_time
+					log( epoch, batch_idx, nBatches, lossnames_to_print, [g_loss,d_loss], elapsed )
+	
+#				if np.mod(counter, 100) == 1:
+#					samples, d_loss, g_loss = self.sess.run(
+#						[self.sampler, self.d_loss, self.g_loss],
+#						feed_dict={
+#								self.t_z: sample_z,
+#								self.inputs: sample_inputs,
+#								self.t_y:sample_labels,
+#						}
+#					)
+#					manifold_h = int(np.ceil(np.sqrt(samples.shape[0])))
+#					manifold_w = int(np.floor(np.sqrt(samples.shape[0])))
+#					save_images(samples, [manifold_h, manifold_w],
+#								'./{}/train_{:02d}_{:04d}.png'.format(opts.sample_dir, epoch, batch_idx))
+#					print("[Sample] d_loss: %.8f, g_loss: %.8f" % (d_loss, g_loss)) 
+				if np.mod(counter, opts.save_every_batch) == 1:
+					self.save(opts.checkpoint_dir, counter)
+
+			# run test for every epoch
+			z_noise = np.random.uniform(-1,1, [opts.batch_size, opts.z_dim] )
+			fake_text = self.sess.run(outputs['freeText'],
+										feed_dict={ input_tensors['t_z'] : z_noise } )
+			fake_text = " ".join([ self.data_loader.vocab.id_to_word(w) for w in fake_text[0].tolist() ])
+			print( fake_text )
+			f_valid.write( fake_text+'\n' )
+			f_valid.flush()
+		f_valid.close()
 
 	@property
 	def model_dir(self):
-		return "{}_{}_{}_{}_{}".format( self.model, self.dataset, self.batch_size, self.output_height, self.output_width)
+		return "{}_{}_{}_{}_{}".format( self.opts.model, self.opts.dataset, self.opts.batch_size,
+										 self.opts.output_height, self.opts.output_width)
 			
 	def save(self, checkpoint_dir, step):
 		model_name = "DCGAN.model"
