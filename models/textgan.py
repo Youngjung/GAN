@@ -23,67 +23,78 @@ def GRUcell( num_units, isTrain=False, dropout_keep_ratio=0.5 ):
 
 # network for sequence generation
 # ref: ptb_word_lm.py from tutorial rnn, line 104-200
-def generator(z, vocab_size, opts):
+def generator(z, vocab_size, opts, GTtext=None, reuse=False):
 	with tf.variable_scope("generator") as scope:
+		if reuse: scope.reuse_variables()
+
+		# embedding map for GTtext embedding in teacher-forcing mode
+		with tf.variable_scope("embedding") as scope_embedding:
+			embedding_map = tf.get_variable( "map", [vocab_size,opts.gru_num_units] )
+
 		# make 2-layer gru
 		stacked_gru = tf.contrib.rnn.MultiRNNCell(
-					[GRUcell(opts.gru_num_units) for _ in range(opts.gru_num_layers)], state_is_tuple=True )
-
+					[GRUcell(opts.gru_num_units,opts.phase=='train') for _ in range(opts.gru_num_layers)] )
 		# feed z
-		z_fc = linear( z, opts.gru_num_units, scope )
+		z_fc = linear( z, opts.gru_num_units, scope_name='z_fc', reuse=reuse )
 		zero_state = stacked_gru.zero_state( batch_size=opts.batch_size, dtype=tf.float32 )
 		cell_output, initial_state = stacked_gru( z_fc, zero_state )
 
-		# manual unrolling 
+		# manual unrolling is used because static_rnn and dynamic_rnn return the final state only
+		scope.reuse_variables()
 		state = initial_state
 		gru_outputs = []
-		for time_step in range(opts.sequence_length):
-			cell_output, state = stacked_gru( cell_output, state )
-			gru_outputs.append( cell_output )
+		gru_states = []
+		if GTtext is not None: # for teacher-forcing mode
+			GT_embedded = tf.nn.embedding_lookup( embedding_map, GTtext )
+			GTs = tf.unstack( GT_embedded, opts.sequence_length, axis=1 )
+			for time_step in range(opts.sequence_length):
+				gru_output, state = stacked_gru( GTs[time_step], state )
+				gru_outputs.append( cell_output )
+				gru_states.append( tf.concat(state,axis=1) )
+		else: # for free-running mode
+			for time_step in range(opts.sequence_length):
+				cell_output, state = stacked_gru( cell_output, state )
+				gru_outputs.append( cell_output )
+				gru_states.append( tf.concat(state,axis=1) )
 			
-		gru_outputs_reshape = tf.reshape( gru_outputs, [-1, stacked_gru.output_size] )
+		gru_outputs = tf.stack(gru_outputs, axis=1)
+		gru_states = tf.stack(gru_states, axis=1)
 
-		with tf.variable_scope('logits') as scope_logits:
-			logits = linear( gru_outputs_reshape, vocab_size, scope_logits )
+		behavior = [gru_outputs, gru_states] 
 
-		# sample text from logits
-		words = tf.nn.softmax( logits )
-		words = tf.to_int32( words )
-		#words = tf.multinomial( logits,1 )
-		words = tf.reshape( words, [opts.batch_size, -1] )
+		return behavior
 
-		return words
+def NLLlossForBehavior( behavior, GTtext, vocab_size ):
+	gru_outputs = behavior[0]
+	batch_size, sequence_length, gru_size = gru_outputs.get_shape().as_list()
+	logits = linear( tf.reshape( gru_outputs,[-1,gru_size] ), vocab_size, scope_name='NLLlogits' )
+	logits = tf.reshape( logits,[batch_size, sequence_length, vocab_size] )
+
+	# average_across_timesteps might have to be set False
+	return tf.contrib.seq2seq.sequence_loss( logits, GTtext, tf.ones([batch_size, sequence_length]) )
+#	return tf.reduce_sum(
+#			tf.nn.sparse_softmax_cross_entropy_with_logits(labels=GTtext, logits=logits) )
+	
 
 # network for sequence classification
 # ref: https://danijar.com/introduction-to-recurrent-networks-in-tensorflow/
-def discriminator(text, vocab_size, opts, reuse=False):
+def discriminator(behavior, opts, reuse=False):
 	with tf.variable_scope("discriminator") as scope:
 		if reuse:
 			scope.reuse_variables()
 
-#		# represent text as one-hot
-#		text = tf.one_hot( text, vocab_size, 1., 0. )
-#
-#		# reshape and embedding and back
-#		text_reshaped = tf.reshape( text, [-1, vocab_size] )
-#		with tf.variable_scope('embedding') as scope_embedding:
-#			embedded_to_be_reshaped = linear( text_reshaped, opts.gru_num_units, scope_embedding )
-#		embedded = tf.reshape( embedded_to_be_reshaped, [opts.batch_size, -1, opts.gru_num_units] )
-
-		# embedding
-		with tf.variable_scope("embedding") as scope_embedding:
-			embedding_map = tf.get_variable( "map", [vocab_size,opts.gru_num_units] )
-			text_embedded = tf.nn.embedding_lookup( embedding_map, text )
-
 		# make 2-layer gru
 		stacked_gru = tf.contrib.rnn.MultiRNNCell(
-						[GRUcell(opts.gru_num_units,True) for _ in range(opts.gru_num_layers)])
+						[GRUcell(opts.gru_num_units*3,True) for _ in range(opts.gru_num_layers)])
 
-		# unroll -> opts.sequence_length
+		# use dynamic_rnn
+		behaviors = tf.concat(behavior, axis=2)
 		zero_state = stacked_gru.zero_state( batch_size=opts.batch_size, dtype=tf.float32 )
+		batch_size = behavior[0].get_shape().as_list()[0]
+		lengths = tf.tile( [opts.sequence_length], [batch_size] )
 		gru_outputs, _ = tf.nn.dynamic_rnn( cell=stacked_gru,
-											inputs=text_embedded,
-											#sequence_length=opts.sequence_length,
+											inputs=behaviors,
+											sequence_length=lengths,
 											initial_state=zero_state,
 											dtype=tf.float32,
 											scope=scope )
@@ -93,8 +104,7 @@ def discriminator(text, vocab_size, opts, reuse=False):
 		gru_last_output = tf.gather( gru_outputs, int(gru_outputs.get_shape()[0])-1 )
 		
 		# fully connected
-		with tf.variable_scope('logits') as scope_logits:
-			logits = linear( gru_last_output, 2, scope_logits )
+		logits = linear( gru_last_output, 2, scope_name='logits')
 
 		return tf.nn.sigmoid(logits), logits
 	
@@ -123,24 +133,30 @@ class TextGAN(object):
 		t_z = tf.placeholder(tf.float32, [opts.batch_size, opts.z_dim], name='z')
 		t_realText = tf.placeholder(tf.int32, [opts.batch_size, opts.sequence_length], name='real_text')
 		
-		t_fakeText = generator( t_z, vocab_size, opts )
-		t_D_fake, t_D_fake_logits = discriminator( t_fakeText, vocab_size, opts )
-		t_D_real, t_D_real_logits = discriminator( t_realText, vocab_size, opts, reuse=True)
+		t_freeBehavior = generator( t_z, vocab_size, opts )
+		t_teacherBehavior = generator( t_z, vocab_size, opts, t_realText, reuse=True )
 
-		g_loss      = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
-											logits=t_D_fake_logits, labels=tf.ones_like(t_D_fake)))
+		t_D_free, t_D_free_logits = discriminator( t_freeBehavior, opts )
+		t_D_teacher, t_D_teacher_logits = discriminator( t_teacherBehavior, opts, reuse=True)
 
-		d_loss_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
-											logits=t_D_real_logits, labels=tf.ones_like(t_D_real)))
-		d_loss_fake = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
-											logits=t_D_fake_logits, labels=tf.zeros_like(t_D_fake)))
-		d_loss = d_loss_real + d_loss_fake
+		loss_NLL = NLLlossForBehavior( t_teacherBehavior, t_realText, vocab_size )
+		loss_fool = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
+											logits=t_D_free_logits, labels=tf.ones_like(t_D_free)))
+		g_loss = loss_NLL + loss_fool
+
+		d_loss_free = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
+											logits=t_D_free_logits, labels=tf.zeros_like(t_D_free)))
+		d_loss_teacher = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
+											logits=t_D_teacher_logits, labels=tf.ones_like(t_D_teacher)))
+		d_loss = d_loss_free + d_loss_teacher
 
 		summary = {}
 		summary['g_loss'] = tf.summary.scalar("g_loss", g_loss)
-		summary['d_loss_real'] = tf.summary.scalar("d_loss_real", d_loss_real)
-		summary['d_loss_fake'] = tf.summary.scalar("d_loss_fake", d_loss_fake)
+		summary['g_loss_NLL'] = tf.summary.scalar("g_loss_NLL", loss_NLL)
+		summary['g_loss_fool'] = tf.summary.scalar("g_loss_fool", loss_fool)
 		summary['d_loss'] = tf.summary.scalar("d_loss", d_loss)
+		summary['d_loss_free'] = tf.summary.scalar("d_loss_free", d_loss_free)
+		summary['d_loss_teacher'] = tf.summary.scalar("d_loss_teacher", d_loss_teacher)
 
 		self.saver = tf.train.Saver()
 
@@ -159,7 +175,7 @@ class TextGAN(object):
 		self.loss = { 'g_loss' : g_loss,
 					'd_loss' : d_loss }
 
-		self.outputs = { 'G' : t_fakeText }
+		self.outputs = { 'G' : t_freeBehavior}
 
 		self.summary = summary
 
@@ -174,13 +190,12 @@ class TextGAN(object):
 
 		d_optim = tf.train.AdamOptimizer(opts.lr, beta1=opts.beta1) \
 							.minimize(loss['d_loss'], var_list=variables['d_vars'])
-		self.summaryWriter = tf.summary.FileWriter("./logs", self.sess.graph)
-		pdb.set_trace()
 		g_optim = tf.train.AdamOptimizer(opts.lr, beta1=opts.beta1) \
 							.minimize(loss['g_loss'], var_list=variables['g_vars'])
+		self.summaryWriter = tf.summary.FileWriter("./logs", self.sess.graph)
 		tf.global_variables_initializer().run()
 
-		d_sum = tf.summary.merge([summary['d_loss'], summary['d_loss_real'], summary['d_loss_fake']])
+		d_sum = tf.summary.merge([summary['d_loss'], summary['d_loss_free'], summary['d_loss_teacher']])
 
 		sample_z = np.random.uniform(-1, 1, size=(opts.sample_num , opts.z_dim))
 		
