@@ -101,10 +101,10 @@ def deconv2d(input_, output_shape,
 def lrelu(x, leak=0.2, name="lrelu"):
 	return tf.maximum(x, leak*x)
 
-def linear(input_, output_size, scope=None, stddev=0.02, bias_start=0.0, with_w=False):
+def linear(input_, output_size, scope_name=None, stddev=0.02, bias_start=0.0, with_w=False, reuse=None):
 	shape = input_.get_shape().as_list()
 
-	with tf.variable_scope(scope or "Linear"):
+	with tf.variable_scope(scope_name or "Linear", reuse=reuse):
 		matrix = tf.get_variable("Matrix", [shape[1], output_size], tf.float32,
 								 tf.random_normal_initializer(stddev=stddev))
 		bias = tf.get_variable("bias", [output_size],
