@@ -138,6 +138,8 @@ class TextGAN(object):
 		t_D_teacher, t_D_teacher_logits = discriminator( t_teacherBehavior, opts, reuse=True)
 
 		t_freeText = tf.argmax( tf.nn.softmax( t_freeBehavior[0] ), axis=2 )
+		t_D_accFree = tf.argmin( tf.nn.softmax( t_D_free_logits ) , axis=1 )
+		t_D_accTeacher = tf.argmax( tf.nn.softmax( t_D_teacher_logits ), axis=1 )
 
 		loss_NLL = NLLlossForBehavior( t_teacherBehavior, t_realText, vocab_size )
 		loss_fool = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
@@ -175,6 +177,8 @@ class TextGAN(object):
 					'd_loss' : d_loss }
 
 		self.outputs = { 'G' : t_freeBehavior,
+						'd_accFree': t_D_accFree ,
+						'd_accTeacher': t_D_accTeacher ,
 						'freeText': t_freeText }
 
 		self.summary = summary
@@ -208,58 +212,90 @@ class TextGAN(object):
 
 		f_valid = open('valid.txt','w')
 		lossnames_to_print = ['g_loss', 'd_loss']
+		skip_learning_D = skip_learning_G = False
 		for epoch in range(opts.nEpochs):
 			nBatches = self.data_loader.nSamples['train'] // opts.batch_size
+			valid_real_text = self.data_loader.get_batch_text(epoch, opts.sequence_length, 'valid')
+			valid_z_noise = np.random.uniform(-1,1, [opts.batch_size, opts.z_dim] )
 
 			for batch_idx in range(nBatches):
 				real_text = self.data_loader.get_batch_text(batch_idx, opts.sequence_length)
 				z_noise = np.random.uniform(-1,1, [opts.batch_size, opts.z_dim] )
+
+#				# check D's and G's loss with validation set
+#				d_loss, g_loss = self.sess.run(
+#					[loss['d_loss'], loss['g_loss']],
+#					feed_dict={ 
+#						input_tensors['t_z'] : valid_z_noise,
+#						input_tensors['t_realText'] : valid_real_text
+#					})
+#				skip_learning_D = d_loss < 0.1
+#				skip_learning_G = g_loss < 0.5
+				
+#				# check D's accuracy with validation set
+#				d_accFree, d_accTeacher = self.sess.run(
+#					[outputs['d_accFree'], outputs['d_accTeacher']],
+#					feed_dict={ 
+#						input_tensors['t_z'] : valid_z_noise,
+#						input_tensors['t_realText'] : valid_real_text
+#					})
+#				d_acc = sum(d_accFree + d_accTeacher)*0.5/opts.batch_size
+#				skip_learning_D = d_acc > 0.9
+#				skip_learning_G = d_acc < 0.75
 	
-				# Update D network
-				_, d_loss, summary_str = self.sess.run([d_optim, loss['d_loss'], d_sum],
-					feed_dict={ 
-						input_tensors['t_z'] : z_noise,
-						input_tensors['t_realText'] : real_text
-					})
-				self.summaryWriter.add_summary(summary_str, counter)
+				if skip_learning_D:
+					d_loss, d_accFree, d_accTeacher, summary_str = self.sess.run(
+						[loss['d_loss'], outputs['d_accFree'], outputs['d_accTeacher'], d_sum],
+						feed_dict={ 
+							input_tensors['t_z'] : z_noise,
+							input_tensors['t_realText'] : real_text
+						})
+					self.summaryWriter.add_summary(summary_str, counter)
+					d_acc = sum(d_accFree + d_accTeacher)*0.5/opts.batch_size
+					skip_learning_D = d_loss < 0.1
+				else:
+					# Update D network
+					_, d_loss, d_accFree, d_accTeacher, summary_str = self.sess.run(
+						[d_optim, loss['d_loss'], outputs['d_accFree'], outputs['d_accTeacher'], d_sum],
+						feed_dict={ 
+							input_tensors['t_z'] : z_noise,
+							input_tensors['t_realText'] : real_text
+						})
+					self.summaryWriter.add_summary(summary_str, counter)
+					d_acc = sum(d_accFree + d_accTeacher)*0.5/opts.batch_size
+					skip_learning_D = d_loss < 0.1
 	
-				# Update G network
-				_, g_loss, summary_str = self.sess.run([g_optim, loss['g_loss'], g_sum],
-					feed_dict={
-						input_tensors['t_z'] : z_noise,
-						input_tensors['t_realText'] : real_text
-					})
-				self.summaryWriter.add_summary(summary_str, counter)
-	
-				# Run g_optim twice to make sure that d_loss does not go to zero (different from paper)
-				_, g_loss, summary_str = self.sess.run([g_optim, loss['g_loss'], g_sum],
-					feed_dict={
-						input_tensors['t_z'] : z_noise,
-						input_tensors['t_realText'] : real_text
-					})
-				self.summaryWriter.add_summary(summary_str, counter)
-	
+					if skip_learning_D:
+						print( 'skip learning D : d_loss({:.4f}), acc({:.4f}={:.4f}+{:.4f})'.format(
+								d_loss, d_acc,sum(d_accFree)/opts.batch_size,sum(d_accTeacher)/opts.batch_size) )
+
+				if skip_learning_G:
+					g_loss, summary_str = self.sess.run([loss['g_loss'], g_sum],
+						feed_dict={
+							input_tensors['t_z'] : z_noise,
+							input_tensors['t_realText'] : real_text
+						})
+					skip_learning_G = g_loss < 0.5
+				else:
+					# Update G network
+					_, g_loss, summary_str = self.sess.run([g_optim, loss['g_loss'], g_sum],
+						feed_dict={
+							input_tensors['t_z'] : z_noise,
+							input_tensors['t_realText'] : real_text
+						})
+					self.summaryWriter.add_summary(summary_str, counter)
+					skip_learning_G = g_loss < 0.5
+					if skip_learning_G:
+						print( 'skip learning G : g_loss({:.4f}, D\'s acc({:.4f}={:.4f}+{:.4f})'.format(
+								g_loss, d_acc,sum(d_accFree)/opts.batch_size,sum(d_accTeacher)/opts.batch_size) )
 	
 				counter += 1
 				if counter % opts.print_every==0:
 					elapsed = time.time() - start_time
 					log( epoch, batch_idx, nBatches, lossnames_to_print, [g_loss,d_loss], elapsed )
 	
-#				if np.mod(counter, 100) == 1:
-#					samples, d_loss, g_loss = self.sess.run(
-#						[self.sampler, self.d_loss, self.g_loss],
-#						feed_dict={
-#								self.t_z: sample_z,
-#								self.inputs: sample_inputs,
-#								self.t_y:sample_labels,
-#						}
-#					)
-#					manifold_h = int(np.ceil(np.sqrt(samples.shape[0])))
-#					manifold_w = int(np.floor(np.sqrt(samples.shape[0])))
-#					save_images(samples, [manifold_h, manifold_w],
-#								'./{}/train_{:02d}_{:04d}.png'.format(opts.sample_dir, epoch, batch_idx))
-#					print("[Sample] d_loss: %.8f, g_loss: %.8f" % (d_loss, g_loss)) 
-				if np.mod(counter, opts.save_every_batch) == 1:
+				if np.mod(counter, opts.save_every_batch) == 1 or \
+					(epoch==opts.nEpochs-1 and batch_idx==nBatches-1) :
 					self.save(opts.checkpoint_dir, counter)
 
 			# run test for every epoch
