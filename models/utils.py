@@ -336,7 +336,10 @@ def log( epoch, batch, nBatches, lossnames, losses, elapsed, filelogger=None ):
 			str_lossnames += ','
 			str_losses += ', '
 		str_lossnames += lossname
-		str_losses += '{:.2f}'.format(loss)
+		if type(loss) == str:
+			str_losses += loss
+		else:
+			str_losses += '{:.2f}'.format(loss)
 		isFirst = False
 
 	m,s = divmod( elapsed, 60 )
