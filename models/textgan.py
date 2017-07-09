@@ -28,7 +28,7 @@ def generator(z, vocab_size, opts, GTtext=None, reuse=False):
 		if reuse: scope.reuse_variables()
 
 		# embedding map for GTtext embedding in teacher-forcing mode
-		with tf.variable_scope("embedding") as scope_embedding:
+		with tf.variable_scope("embedding") as scope_embedding, tf.device("/cpu:0"):
 			embedding_map = tf.get_variable( "map", [vocab_size,opts.gru_num_units] )
 
 		# make 2-layer gru
@@ -45,7 +45,8 @@ def generator(z, vocab_size, opts, GTtext=None, reuse=False):
 		gru_outputs = []
 		gru_states = []
 		if GTtext is not None: # for teacher-forcing mode
-			GT_embedded = tf.nn.embedding_lookup( embedding_map, GTtext )
+			with tf.device("cpu:0"):
+				GT_embedded = tf.nn.embedding_lookup( embedding_map, GTtext )
 			GTs = tf.unstack( GT_embedded, opts.sequence_length, axis=1 )
 			for time_step in range(opts.sequence_length):
 				gru_output, state = stacked_gru( GTs[time_step], state )
@@ -62,7 +63,15 @@ def generator(z, vocab_size, opts, GTtext=None, reuse=False):
 
 		behavior = [gru_outputs, gru_states] 
 
-		return behavior
+		if GTtext is None:
+			return behavior
+		
+		scope._reuse = None
+		logits = linear( tf.reshape(gru_outputs, [-1,opts.gru_num_units] ), vocab_size, scope_name='NLLlogits' )
+		logits = tf.reshape( logits,[opts.batch_size, opts.sequence_length, vocab_size] )
+		loss = tf.contrib.seq2seq.sequence_loss( logits, GTtext, tf.ones([opts.batch_size, opts.sequence_length]) )
+
+		return behavior, loss, logits
 
 def NLLlossForBehavior( behavior, GTtext, vocab_size ):
 	gru_outputs = behavior[0]
@@ -132,7 +141,7 @@ class TextGAN(object):
 		t_realText = tf.placeholder(tf.int32, [opts.batch_size, opts.sequence_length], name='real_text')
 		
 		t_freeBehavior = generator( t_z, vocab_size, opts )
-		t_teacherBehavior = generator( t_z, vocab_size, opts, t_realText, reuse=True )
+		t_teacherBehavior, loss_NLL, _ = generator( t_z, vocab_size, opts, t_realText, reuse=True )
 
 		t_D_free, t_D_free_logits = discriminator( t_freeBehavior, opts )
 		t_D_teacher, t_D_teacher_logits = discriminator( t_teacherBehavior, opts, reuse=True)
@@ -141,7 +150,7 @@ class TextGAN(object):
 		t_D_accFree = tf.argmin( tf.nn.softmax( t_D_free_logits ) , axis=1 )
 		t_D_accTeacher = tf.argmax( tf.nn.softmax( t_D_teacher_logits ), axis=1 )
 
-		loss_NLL = NLLlossForBehavior( t_teacherBehavior, t_realText, vocab_size )
+#		loss_NLL = NLLlossForBehavior( t_teacherBehavior, t_realText, vocab_size )
 		loss_fool = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
 											logits=t_D_free_logits, labels=tf.ones_like(t_D_free)))
 		g_loss = loss_NLL + loss_fool
@@ -192,6 +201,8 @@ class TextGAN(object):
 		variables = self.variables
 		summary = self.summary
 
+		g_pre_optim = tf.train.AdamOptimizer(opts.lr, beta1=opts.beta1) \
+							.minimize(loss['g_loss_NLL'], var_list=variables['g_vars'])
 		d_optim = tf.train.AdamOptimizer(opts.lr, beta1=opts.beta1) \
 							.minimize(loss['d_loss'], var_list=variables['d_vars'])
 		g_optim = tf.train.AdamOptimizer(opts.lr, beta1=opts.beta1) \
@@ -210,6 +221,33 @@ class TextGAN(object):
 		if could_load:
 			counter = checkpoint_counter
 
+		f_valid_pre = open('valid_pre.txt','w')
+		# pretraining Generator
+		for epoch in range(opts.nEpochs):
+			nBatches = self.data_loader.nSamples['train'] // opts.batch_size
+			valid_real_text = self.data_loader.get_batch_text(epoch, opts.sequence_length, 'valid')
+			valid_z_noise = np.random.uniform(-1,1, [opts.batch_size, opts.z_dim] )
+
+			for batch_idx in range(nBatches):
+				real_text = self.data_loader.get_batch_text(batch_idx, opts.sequence_length)
+				z_noise = np.random.uniform(-1,1, [opts.batch_size, opts.z_dim] )
+				_, g_loss, summary_str = self.sess.run([g_pre_optim, loss['g_loss_NLL'], summary['g_loss_NLL']],
+					feed_dict={
+						input_tensors['t_z'] : z_noise,
+						input_tensors['t_realText'] : real_text
+					})
+				self.summaryWriter.add_summary(summary_str, counter)
+
+			# run test after every epoch
+			z_noise = np.random.uniform(-1,1, [opts.batch_size, opts.z_dim] )
+			fake_text = self.sess.run(outputs['freeText'],
+										feed_dict={ input_tensors['t_z'] : z_noise } )
+			fake_text = " ".join([ self.data_loader.vocab.id_to_word(w) for w in fake_text[0].tolist() ])
+			print( fake_text )
+			f_valid_pre.write( fake_text+'\n' )
+			f_valid_pre.flush()
+
+		# main training
 		f_valid = open('valid.txt','w')
 		lossnames_to_print = ['g_loss', 'd_loss']
 		skip_learning_D = skip_learning_G = False
@@ -298,7 +336,7 @@ class TextGAN(object):
 					(epoch==opts.nEpochs-1 and batch_idx==nBatches-1) :
 					self.save(opts.checkpoint_dir, counter)
 
-			# run test for every epoch
+			# run test after every epoch
 			z_noise = np.random.uniform(-1,1, [opts.batch_size, opts.z_dim] )
 			fake_text = self.sess.run(outputs['freeText'],
 										feed_dict={ input_tensors['t_z'] : z_noise } )
