@@ -6,7 +6,7 @@ import ops
 import os
 import glob
 from os.path import join
-import image_processing
+from utils import image_processing
 import random
 import shutil
 import pdb

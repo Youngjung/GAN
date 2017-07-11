@@ -15,6 +15,7 @@ import pdb
 
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
+from utils import image_processing
 
 pp = pprint.PrettyPrinter()
 
@@ -325,7 +326,7 @@ def preprocess_A_and_B(img_A, img_B, load_size=286, fine_size=256, flip=True, is
 #	added by Youngjung
 ##########################
 
-def log( epoch, batch, nBatches, lossnames, losses, elapsed, filelogger=None ):
+def log( epoch, batch, nBatches, lossnames, losses, elapsed, counter=None, filelogger=None ):
 	nDigits = len(str(nBatches))
 	str_lossnames = ""
 	str_losses = ""
@@ -346,7 +347,28 @@ def log( epoch, batch, nBatches, lossnames, losses, elapsed, filelogger=None ):
 	h,m = divmod( m,60 )
 	timestamp = "{:2}:{:02}:{:02}".format( int(h),int(m),int(s) )
 	log = "{} epoch {} batch {:>{}}/{} ({})=({})".format( timestamp, epoch, batch, nDigits, nBatches, str_lossnames, str_losses )
+	if counter is not None:
+		log = "counter {} " + log
 	print( log )
 	if filelogger:
 		filelogger.write( log )
 	return log
+
+
+def process_image(encoded_image, opts, thread_id=0):
+	"""Decodes and processes an image string.
+
+	Args:
+		encoded_image: A scalar string Tensor; the encoded image.
+		thread_id: Preprocessing thread id used to select the ordering of color
+			distortions.
+
+	Returns:
+		A float32 Tensor of shape [height, width, 3]; the processed image.
+	"""
+	return image_processing.process_image(encoded_image,
+											is_training=opts.phase=='train',
+											height=opts.input_height,
+											width=opts.input_width,
+											thread_id=thread_id,
+											image_format=opts.image_format)

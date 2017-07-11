@@ -7,7 +7,7 @@ import numpy as np
 from six.moves import xrange
 from collections import namedtuple
 
-from module import *
+from cyclegan_module import *
 from utils import *
 
 import pdb

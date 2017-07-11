@@ -9,7 +9,7 @@ from models.dcgan import DCGAN
 from models.text2image import Text2Image
 from models.cyclegan import CycleGAN
 from models.textgan import TextGAN
-from models.utils import visualize, show_all_variables
+from models.misc import visualize, show_all_variables
 
 import tensorflow as tf
 
@@ -27,8 +27,23 @@ def main(opts):
 	if opts.output_width is None:
 		opts.output_width = opts.output_height
 
+	if opts.dataset=='mscoco':
+		opts.image_feature_name = 'image/data'
+		opts.caption_feature_name = 'image/caption_ids'
+		opts.image_format = 'jpeg'
+		opts.num_examples_per_epoch = 586363
+
+	# path for TFRecords
+	if opts.phase=='train':
+		opts.input_file_pattern = join(opts.data_dir,opts.dataset,'train-?????-of-00256')
+	elif opts.phase=='valid':
+		opts.input_file_pattern = join(opts.data_dir,opts.dataset,'val-?????-of-00256')
+
+	# path for checkpoint
 	if not os.path.exists(opts.checkpoint_dir):
 		os.makedirs(opts.checkpoint_dir)
+
+	# path for sample images
 	opts.sample_dir = join( opts.sample_dir, opts.model )
 	if not os.path.exists(opts.sample_dir):
 		os.makedirs(opts.sample_dir)
@@ -127,9 +142,17 @@ if __name__ == '__main__':
 	#parser.add_argument('--', type=int, default=None, help="")
 	
 	# for textGAN
-	parser.add_argument('--gru_num_units', type=int, default=256, help="")
+	parser.add_argument('--gru_num_units', type=int, default=512, help="")
 	parser.add_argument('--gru_num_layers', type=int, default=2, help="")
 	parser.add_argument('--sequence_length', type=int, default=30, help="")
+	parser.add_argument('--keep_prob', type=float, default=0.5, help="")
+	parser.add_argument('--embedding_size', type=int, default=512, help="")
+	parser.add_argument('--decay_every_nEpochs', type=int, default=8, help="")
+	parser.add_argument('--decay_factor', type=float, default=0.5, help="")
+	parser.add_argument('--values_per_input_shard', type=int, default=2300, help="")
+	parser.add_argument('--input_queue_capacity_factor', type=int, default=2, help="")
+	parser.add_argument('--num_input_reader_threads', type=int, default=1, help="")
+	parser.add_argument('--num_preprocess_threads', type=int, default=4, help="")
 
 
 	args = parser.parse_args()
