@@ -37,7 +37,7 @@ def main(opts):
 	if opts.phase=='train':
 		opts.input_file_pattern = join(opts.data_dir,opts.dataset,'train-?????-of-00256')
 	elif opts.phase=='valid':
-		opts.input_file_pattern = join(opts.data_dir,opts.dataset,'val-?????-of-00256')
+		opts.input_file_pattern = join(opts.data_dir,opts.dataset,'val-?????-of-00004')
 
 	# path for checkpoint
 	if not os.path.exists(opts.checkpoint_dir):
@@ -72,6 +72,8 @@ def main(opts):
 
 		if opts.phase=='train':
 			model.train()
+		elif opts.phase=='valid':
+			model.valid()
 		else:
 			if not model.load(opts.checkpoint_dir)[0]:
 				raise Exception("[!] Train a model first, then run test mode")
@@ -102,7 +104,7 @@ if __name__ == '__main__':
 	parser.add_argument('--beta1', type=float, default=0.5, help='momentum term of adam')
 	parser.add_argument('--flip', type=str2bool, default=True, help='if flip the images for data argumentation')
 	parser.add_argument('--which_direction', default='AtoB', help='AtoB or BtoA')
-	parser.add_argument('--phase', default='train', help='train, test')
+	parser.add_argument('--phase', default='train', help='train, valid, test')
 	parser.add_argument('--save_latest_freq', type=int, default=5000, 
 							help='save the latest model every latest_freq sgd iterations (overwrites the previous latest model)')
 	parser.add_argument('--continue_train', type=str2bool, default=False, 
@@ -134,6 +136,7 @@ if __name__ == '__main__':
 	parser.add_argument('--output_width', type=int, default=None, help="The size of output image to produce , None=output_height")
 	parser.add_argument('--dataset',default='mnist', help="The name of dataset [celebA, mnist, lsun, horse2zebra, mscoco, flowers]")
 	parser.add_argument('--data_dir', type=str, default="data", help='Data Directory')
+	parser.add_argument('--log_dir', type=str, default="logs", help='tf.Summary Directory')
 	parser.add_argument('--input_fname_pattern', default='*.jpg', help="Glob pattern of filename of input images [*]")
 	parser.add_argument('--crop', type=str2bool, default=True, help="True for training, False for testing [False]")
 	parser.add_argument('--visualize', type=str2bool,default=False, help="True for visualizing, False for nothing [False]")

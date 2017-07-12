@@ -348,7 +348,7 @@ def log( epoch, batch, nBatches, lossnames, losses, elapsed, counter=None, filel
 	timestamp = "{:2}:{:02}:{:02}".format( int(h),int(m),int(s) )
 	log = "{} epoch {} batch {:>{}}/{} ({})=({})".format( timestamp, epoch, batch, nDigits, nBatches, str_lossnames, str_losses )
 	if counter is not None:
-		log = "counter {} " + log
+		log = "cnt{:>5} ".format(counter) + log
 	print( log )
 	if filelogger:
 		filelogger.write( log )
