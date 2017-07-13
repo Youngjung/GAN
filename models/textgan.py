@@ -10,6 +10,7 @@ from six.moves import xrange
 
 from ops import *
 from misc import *
+from utils import image_embedding
 from data_loader.vocabulary import Vocabulary, load_vocab
 
 import input_ops
@@ -37,12 +38,38 @@ def LSTMcell( num_units, isTraining=False, dropout_keep_prob=0.5 ):
 													output_keep_prob=dropout_keep_prob )
 	return lstm_cell
 
-def build_seq_embeddings( input_seqs, vocab_size, opts ):
+def build_image_embeddings(images, embedding_size, isTraining, reuse):
+	"""Builds the image model subgraph and generates image embeddings."""
+	inception_output = image_embedding.inception_v3(
+			images,
+			trainable=False,
+			is_training=isTraining,
+			reuse=reuse)
+	inception_variables = tf.get_collection(
+			tf.GraphKeys.GLOBAL_VARIABLES, scope="InceptionV3")
+
+	# Map inception output into embedding space.
+	with tf.variable_scope("image_embedding") as scope:
+		if reuse: scope.reuse_variables()
+		image_embeddings = tf.contrib.layers.fully_connected(
+				inputs=inception_output,
+				num_outputs=embedding_size,
+				activation_fn=None,
+				weights_initializer=myInitializer,
+				biases_initializer=None,
+				scope=scope)
+
+	# Save the embedding size in the graph.
+	tf.constant(embedding_size, name="embedding_size")
+
+	return image_embeddings, inception_output, inception_variables
+
+def build_seq_embeddings( input_seqs, vocab_size, embedding_size ):
 
 	with tf.variable_scope("seq_embedding"), tf.device("/cpu:0"):
 		embedding_map = tf.get_variable(
 				name="map",
-				shape=[vocab_size, opts.embedding_size],
+				shape=[vocab_size, embedding_size],
 				initializer=myInitializer)
 		seq_embeddings = tf.nn.embedding_lookup(embedding_map, input_seqs)
 	
@@ -69,14 +96,24 @@ def generator( t_inputs, opts, vocab_size, seq_length=None, isForInference=False
 	t_misc = {}
 	train_op = None # will be replaced below
 
+	# build image embeddings first.
+	# it is not under generator scope to load pretrained inception checkpoint properly.
+	# image_embeddings, inception_output, inception_variables = build_image_embeddings(images, opts.embedding_size)
+	t_noise_fc, _, inception_vars = build_image_embeddings(t_noise, opts.embedding_size, isTraining, reuse)
+
 	with tf.variable_scope("generator") as scope_generator:
 		if reuse: scope_generator.reuse_variables()
-		with tf.variable_scope("noise_fc") as scope_noise:
-			t_noise_fc = tf.contrib.layers.fully_connected( inputs = t_noise,
-															num_outputs = opts.gru_num_units,
-															activation_fn = None,
-															weights_initializer = myInitializer,
-															scope = scope_noise )
+
+# 		currently this part is replaced with image embeddings
+#		with tf.variable_scope("noise_fc") as scope_noise:
+#			t_noise_fc = tf.contrib.layers.fully_connected( inputs = t_noise,
+#															num_outputs = opts.gru_num_units,
+#															activation_fn = None,
+#															weights_initializer = myInitializer,
+#															scope = scope_noise )
+
+		
+		
 		with tf.variable_scope("seq_embedding"), tf.device("/cpu:0"):
 			embedding_map = tf.get_variable(
 					name="map",
@@ -131,7 +168,8 @@ def generator( t_inputs, opts, vocab_size, seq_length=None, isForInference=False
 														scope = scope_logits )
 
 		if isForInference:
-			return tf.argmax( tf.nn.softmax(logits, name="softmax"), axis=1 ), initial_state_for_inference, state_feed, state_concat
+			word_id = tf.argmax( tf.nn.softmax(logits, name="softmax"), axis=1 )
+			return word_id, initial_state_for_inference, state_feed, state_concat
 		else:
 			targets = tf.reshape( t_realText_shifted, [-1] )
 			weights = tf.to_float( tf.reshape( t_input_mask, [-1] ) )
@@ -141,7 +179,7 @@ def generator( t_inputs, opts, vocab_size, seq_length=None, isForInference=False
 			tf.losses.add_loss( batch_loss )
 			total_loss = tf.losses.get_total_loss()
 	
-			return total_loss, losses, weights
+			return total_loss, losses, weights, inception_vars
 
 # network for sequence classification
 # ref: https://danijar.com/introduction-to-recurrent-networks-in-tensorflow/
@@ -228,7 +266,8 @@ class TextGAN(object):
 													 batch_size=opts.batch_size,
 													 queue_capacity=queue_capacity))
 
-		t_z = tf.placeholder(tf.float32, [opts.batch_size, opts.z_dim], name='z')
+		#t_z = tf.placeholder(tf.float32, [opts.batch_size, opts.z_dim], name='z')
+		t_z = images
 		t_realText = input_seqs
 		t_realText_shifted = target_seqs
 		t_mask = input_mask
@@ -242,17 +281,27 @@ class TextGAN(object):
 		opts = self.opts
 		vocab_size = self.vocab.vocab_size
 
-		# self.inputs should be built beforehand
-		total_loss, losses, weights = generator( self.inputs, opts, vocab_size ) 
+		# for training
+		# self.inputs should be built by build_inputs() beforehand
+		total_loss, losses, weights, inception_vars = generator( self.inputs, opts, vocab_size )
+		saver_inception = tf.train.Saver( inception_vars )
+		assert( len(opts.inception_checkpoint_file) > 0 )
+		def load_inception_fn(sess):
+			saver_inception.restore( sess, opts.inception_checkpoint_file )
+		self.load_inception_fn = load_inception_fn
 
 		# for validation
-		t_z_valid = tf.placeholder(tf.float32, [1, opts.z_dim], name='z_valid')
+		# t_z_valid = tf.placeholder(tf.float32, [1, opts.z_dim], name='z_valid')
+		t_z_valid = tf.placeholder(tf.string, [], name='z_valid')
 		t_text_valid = tf.placeholder( dtype=tf.int64, shape=[None], name='text_valid' )
 		self.inputs_valid = { 'noise': t_z_valid,
 							'text': t_text_valid }
+		t_z_valid_processed = tf.expand_dims( process_image(t_z_valid,opts), 0 )
+		self.inputs_valid_processed = { 'noise': t_z_valid_processed,
+							'text': t_text_valid }
 		inferenced, initial_state, state_feed, state_concat = generator(
-									 self.inputs_valid, opts, vocab_size, isForInference=True, reuse=True ) 
-
+									 self.inputs_valid_processed, opts, vocab_size, isForInference=True, reuse=True ) 
+		
 		self.total_loss = total_loss
 		self.losses = losses
 		self.weights = weights
@@ -267,7 +316,11 @@ class TextGAN(object):
 	def train(self):
 		sess = self.sess
 		opts = self.opts
+		vocab = self.vocab
 		global_step = tf.Variable( initial_value=0, name='global_step', trainable=False )
+
+		# load inception variables
+		self.load_inception_fn( sess )
 
 		# Set up the training ops
 		nBatches = opts.num_examples_per_epoch // opts.batch_size
@@ -295,15 +348,17 @@ class TextGAN(object):
 			counter = checkpoint_counter
 		lossnames_to_print = ['g_loss']
 		try:
-			f_valid = open('valid.txt','w')
+			with tf.gfile.GFile('data/mscoco/raw-data/val2014/COCO_val2014_000000224477.jpg','r') as f:
+				valid_image = f.read()
+			f_valid_text = open('valid.txt','w')
 			for epoch in range(opts.nEpochs):
 				for batch_idx in range(nBatches):
 					counter += 1
 					z_noise = np.random.uniform(-1,1, [opts.batch_size, opts.z_dim] )
-					_, g_loss, summary_str = self.sess.run([train_op, self.total_loss, summary_loss],
-						feed_dict={
-							self.inputs['noise'] : z_noise,
-						})
+					_, g_loss, summary_str = self.sess.run([train_op, self.total_loss, summary_loss] )
+#						feed_dict={
+#							self.inputs['noise'] : z_noise,
+#						})
 					self.summaryWriter.add_summary(summary_str, counter)
 	
 					if counter % opts.print_every==0:
@@ -316,19 +371,22 @@ class TextGAN(object):
 
 				# run test after every epoch
 				z_noise = np.random.uniform(-1,1, [1, opts.z_dim] )
-				initial_state = self.sess.run(self.initial_state, feed_dict={ self.inputs_valid['noise'] : z_noise } )
+				initial_state = self.sess.run(self.initial_state, feed_dict={ self.inputs_valid['noise'] : valid_image } )
 				state_output = initial_state
 				word = np.array([vocab.start_id])
-				fake_text = []
+				fake_text = [word]
 				for _ in range(opts.sequence_length):
 					word, state_output = self.sess.run([self.inferenced, self.state_concat],
 											feed_dict={ self.inputs_valid['text'] : word,
 														self.state_feed: state_output } )
 					fake_text.append( word )
+					if word[0] == vocab.end_id:
+						word = np.array([vocab.start_id])
+						fake_text.append( word )
 				fake_text = " ".join([ vocab.id_to_word(w[0]) for w in fake_text ])
 				print( fake_text )
-				f_valid.write( fake_text+'\n' )
-				f_valid.flush()
+				f_valid_text.write( fake_text+'\n' )
+				f_valid_text.flush()
 
 		except tf.errors.OutOfRangeError:
 			print('Finished training: epoch limit reached')

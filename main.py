@@ -156,6 +156,7 @@ if __name__ == '__main__':
 	parser.add_argument('--input_queue_capacity_factor', type=int, default=2, help="")
 	parser.add_argument('--num_input_reader_threads', type=int, default=1, help="")
 	parser.add_argument('--num_preprocess_threads', type=int, default=4, help="")
+	parser.add_argument('--inception_checkpoint_file', type=str, default='', help="")
 
 
 	args = parser.parse_args()
