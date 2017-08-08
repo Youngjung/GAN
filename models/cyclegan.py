@@ -38,6 +38,7 @@ class CycleGAN(object):
 		self.options.output_c_dim = opts.output_nc
 
 		self.model_dir = "%s_%s" % (self.dataset, self.image_size)
+
 		self._build_model()
 		self.saver = tf.train.Saver()
 		self.pool = ImagePool(opts.max_size)
@@ -159,23 +160,23 @@ class CycleGAN(object):
 				fake_A, fake_B = self.sess.run([self.fake_A, self.fake_B],
 					feed_dict={ self.real_data: batch_images })
 				[fake_A, fake_B] = self.pool([fake_A, fake_B])
-				# Update G network
-				_, summary_str = self.sess.run([self.g_a2b_optim, self.g_a2b_sum],
-					feed_dict={ self.real_data: batch_images })
-				self.writer.add_summary(summary_str, counter)
 				# Update D network
 				_, summary_str = self.sess.run([self.db_optim, self.db_sum],
 				   feed_dict={ self.real_data: batch_images,
 							   self.fake_B_sample: fake_B })
 				self.writer.add_summary(summary_str, counter)
 				# Update G network
-				_, summary_str = self.sess.run([self.g_b2a_optim, self.g_b2a_sum],
+				_, summary_str = self.sess.run([self.g_a2b_optim, self.g_a2b_sum],
 					feed_dict={ self.real_data: batch_images })
 				self.writer.add_summary(summary_str, counter)
 				# Update D network
 				_, summary_str = self.sess.run([self.da_optim, self.da_sum],
 				   feed_dict={ self.real_data: batch_images,
 							   self.fake_A_sample: fake_A})
+				self.writer.add_summary(summary_str, counter)
+				# Update G network
+				_, summary_str = self.sess.run([self.g_b2a_optim, self.g_b2a_sum],
+					feed_dict={ self.real_data: batch_images })
 				self.writer.add_summary(summary_str, counter)
 
 				counter += 1
