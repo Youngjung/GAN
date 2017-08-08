@@ -26,12 +26,18 @@ def main(opts):
 		opts.input_width = opts.input_height
 	if opts.output_width is None:
 		opts.output_width = opts.output_height
+	if len(opts.note)>0:
+	    opts.note = '_'+opts.note
 
+	# default const variables
 	if opts.dataset=='mscoco':
 		opts.image_feature_name = 'image/data'
 		opts.caption_feature_name = 'image/caption_ids'
 		opts.image_format = 'jpeg'
 		opts.num_examples_per_epoch = 586363
+		opts.beam_size = 3
+		opts.max_caption_length = 20
+		opts.length_normalization_factor = 0
 
 	# path for TFRecords
 	if opts.phase=='train':
@@ -44,7 +50,8 @@ def main(opts):
 		os.makedirs(opts.checkpoint_dir)
 
 	# path for sample images
-	opts.sample_dir = join( opts.sample_dir, opts.model )
+	opts.sample_dir = join( opts.sample_dir, opts.model, opts.dataset )
+	print( 'sample_dir = {}'.format(opts.sample_dir) )
 	if not os.path.exists(opts.sample_dir):
 		os.makedirs(opts.sample_dir)
 	
@@ -70,9 +77,13 @@ def main(opts):
 
 		show_all_variables()
 
+		# follow checkpoint_dir's convention
+		opts.log_dir = os.path.join(opts.log_dir, model.model_dir+opts.note)
+
+		# run train or validation
 		if opts.phase=='train':
 			model.train()
-		elif opts.phase=='valid':
+		elif opts.phase=='valid': # not to be used so far
 			model.valid()
 		else:
 			if not model.load(opts.checkpoint_dir)[0]:
@@ -140,6 +151,7 @@ if __name__ == '__main__':
 	parser.add_argument('--input_fname_pattern', default='*.jpg', help="Glob pattern of filename of input images [*]")
 	parser.add_argument('--crop', type=str2bool, default=True, help="True for training, False for testing [False]")
 	parser.add_argument('--visualize', type=str2bool,default=False, help="True for visualizing, False for nothing [False]")
+	parser.add_argument('--note', type=str,default='', help="")
 
 	parser.add_argument('--textEncoder', type=str, default='skipthought', help="skipthought / DSSJE")
 	#parser.add_argument('--', type=int, default=None, help="")

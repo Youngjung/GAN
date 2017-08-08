@@ -8,7 +8,7 @@ from six.moves import xrange
 from collections import namedtuple
 
 from cyclegan_module import *
-from utils import *
+from misc import *
 
 import pdb
 
@@ -37,6 +37,7 @@ class CycleGAN(object):
 		self.options.image_size = opts.fine_size
 		self.options.output_c_dim = opts.output_nc
 
+		self.model_dir = "%s_%s" % (self.dataset, self.image_size)
 		self._build_model()
 		self.saver = tf.train.Saver()
 		self.pool = ImagePool(opts.max_size)
@@ -189,8 +190,7 @@ class CycleGAN(object):
 
 	def save(self, checkpoint_dir, step):
 		model_name = "CycleGAN.model"
-		model_dir = "%s_%s" % (self.dataset, self.image_size)
-		checkpoint_dir = os.path.join(checkpoint_dir, model_dir)
+		checkpoint_dir = os.path.join(checkpoint_dir, self.model_dir)
 
 		if not os.path.exists(checkpoint_dir):
 			os.makedirs(checkpoint_dir)
@@ -201,8 +201,7 @@ class CycleGAN(object):
 
 	def load(self, checkpoint_dir):
 
-		model_dir = "%s_%s" % (self.dataset, self.image_size)
-		checkpoint_dir = os.path.join(checkpoint_dir, model_dir)
+		checkpoint_dir = os.path.join(checkpoint_dir, self.model_dir)
 		print(" [*] Reading checkpoint from {}...".format(checkpoint_dir))
 
 		ckpt = tf.train.get_checkpoint_state(checkpoint_dir)
