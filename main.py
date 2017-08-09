@@ -8,7 +8,7 @@ import pdb
 from models.dcgan import DCGAN
 from models.text2image import Text2Image
 from models.cyclegan import CycleGAN
-from models.textgan import TextGAN
+from models.text_decoder import TextDecoder
 from models.misc import visualize, show_all_variables
 
 import tensorflow as tf
@@ -70,8 +70,8 @@ def main(opts):
 			model = Text2Image( sess, opts )
 		elif opts.model == 'CycleGAN':
 			model = CycleGAN( sess, opts )
-		elif opts.model == 'TextGAN':
-			model = TextGAN( sess, opts )
+		elif opts.model == 'TextDecoder':
+			model = TextDecoder( sess, opts )
 		else:
 			raise Exception("undefined model")
 
@@ -96,7 +96,7 @@ def main(opts):
 	
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser(description='')
-	parser.add_argument('--model', default='DCGAN', help='model to use [DCGAN, Text2Image, CycleGAN, TextGAN]')
+	parser.add_argument('--model', default='DCGAN', help='model to use [DCGAN, Text2Image, CycleGAN, TextDecoder]')
 	parser.add_argument('--nEpochs', type=int, default=25, help='# of epoch')
 	parser.add_argument('--save_every_batch', type=int, default=30, 
 							help='Save Model/Samples every x iterations over batches(does not overwrite previously saved models)')
@@ -160,8 +160,7 @@ if __name__ == '__main__':
 	parser.add_argument('--gru_num_units', type=int, default=512, help="")
 	parser.add_argument('--gru_num_layers', type=int, default=2, help="")
 	parser.add_argument('--sequence_length', type=int, default=30, help="")
-	parser.add_argument('--keep_prob', type=float, default=0.5, help="")
-	parser.add_argument('--embedding_size', type=int, default=512, help="")
+	parser.add_argument('--dropout_keep_prob', type=float, default=0.5, help="")
 	parser.add_argument('--decay_every_nEpochs', type=int, default=8, help="")
 	parser.add_argument('--decay_factor', type=float, default=0.5, help="")
 	parser.add_argument('--values_per_input_shard', type=int, default=2300, help="")
@@ -169,6 +168,11 @@ if __name__ == '__main__':
 	parser.add_argument('--num_input_reader_threads', type=int, default=1, help="")
 	parser.add_argument('--num_preprocess_threads', type=int, default=4, help="")
 	parser.add_argument('--inception_checkpoint_file', type=str, default='', help="")
+	parser.add_argument('--vocab_file', type=str, default='vocab.txt', help="")
+	parser.add_argument('--num_lstm_units', type=int, default=1024, help="")
+	parser.add_argument('--embedding_size', type=int, default=1024, help="")
+	parser.add_argument('--vocab_size', type=int, default=12000, help="")
+	#parser.add_argument('--vocab_size', type=int, default=2500, help="")
 
 
 	args = parser.parse_args()
