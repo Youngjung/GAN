@@ -60,11 +60,11 @@ class TextDecoder:
 
 		with tf.variable_scope('lstm', initializer=self.initializer) as lstm_scope:
 			_, initial_state = lstm_cell_withDropout( text_feature, zero_state )
+			lstm_scope.reuse_variables()
 			_, initial_state_infer = lstm_cell( text_feature_infer_exp, zero_state_infer )
 			initial_state_infer = tf.concat( initial_state_infer, 1 )
 
 			text_length = tf.reduce_sum( input_mask, 1 )
-			lstm_scope.reuse_variables()
 			lstm_outputs, lstm_final_state = tf.nn.dynamic_rnn( cell=lstm_cell_withDropout,
 																	inputs = input_embeddings,
 																	sequence_length = text_length,
