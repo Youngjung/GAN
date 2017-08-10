@@ -71,7 +71,7 @@ class CrossModalRepr():
 																	weights_initializer = self.initializer,
 																	biases_initializer = None,
 																	scope = image_emb_scope )
-			inception_vars = tf.get_collection( tf.GraphKeys.GLOBAL_VARIABLES, scope="InceptionV3" )
+		inception_vars = tf.get_collection( tf.GraphKeys.GLOBAL_VARIABLES, scope="InceptionV3" )
 
 		with tf.variable_scope('text_embedding'), tf.device('/cpu:0'):
 			embedding_map = tf.get_variable( name="embedding_map",
@@ -139,10 +139,10 @@ class CrossModalRepr():
 								tf.reduce_sum( mask_reshaped ),
 								name = 'batch_loss_text' )
 		tf.losses.add_loss( batch_loss_text )
-		batch_loss_image = tf.div( tf.reduce_sum( tf.multiply( losses_image, mask_reshaped ) ),
-								tf.reduce_sum( mask_reshaped ),
-								name = 'batch_loss_image' )
-		tf.losses.add_loss( batch_loss_image )
+#		batch_loss_image = tf.div( tf.reduce_sum( tf.multiply( losses_image, mask_reshaped ) ),
+#								tf.reduce_sum( mask_reshaped ),
+#								name = 'batch_loss_image' )
+#		tf.losses.add_loss( batch_loss_image )
 		NLL_loss = tf.losses.get_total_loss()
 		self.NLL_loss = NLL_loss
 
@@ -202,7 +202,8 @@ class CrossModalRepr():
 
 		t_vars = tf.trainable_variables()
 		d_vars = [var for var in t_vars if 'd_' in var.name]
-		g_vars = [var for var in t_vars if 'd_' not in var.name]
+		g_vars = [var for var in t_vars if 'image_embedding' in var.name]
+		print( g_vars )
 
 		self.input_tensors = {
 			'image' : image,
@@ -282,6 +283,20 @@ class CrossModalRepr():
 												input_tensors['input_mask']:mask,
 												input_tensors['image']:images,
 												} )
+#				_, D_loss = self.sess.run( [optim_D, loss['D']],
+#									feed_dict={ input_tensors['text_feature']:caption_vectors,
+#												input_tensors['input_text']:captions,
+#												input_tensors['target_text']:captions_shifted,
+#												input_tensors['input_mask']:mask,
+#												input_tensors['image']:images,
+#												} )
+#				_, G_loss = self.sess.run( [optim_G, loss['G']],
+#									feed_dict={ input_tensors['text_feature']:caption_vectors,
+#												input_tensors['input_text']:captions,
+#												input_tensors['target_text']:captions_shifted,
+#												input_tensors['input_mask']:mask,
+#												input_tensors['image']:images,
+#												} )
 				log( i, batch_no, nBatch, ['NLL'], [NLL_loss], time.time()-start_time, counter )
 				batch_no += 1
 				counter += 1
