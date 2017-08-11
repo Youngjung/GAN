@@ -9,6 +9,7 @@ from models.dcgan import DCGAN
 from models.text2image import Text2Image
 from models.cyclegan import CycleGAN
 from models.text_decoder import TextDecoder
+from models.cross_modal_repr import CrossModalRepr
 from models.misc import visualize, show_all_variables
 
 import tensorflow as tf
@@ -72,6 +73,8 @@ def main(opts):
 			model = CycleGAN( sess, opts )
 		elif opts.model == 'TextDecoder':
 			model = TextDecoder( sess, opts )
+		elif opts.model == 'CrossModalRepr':
+			model = CrossModalRepr( sess, opts )
 		else:
 			raise Exception("undefined model")
 
@@ -167,12 +170,12 @@ if __name__ == '__main__':
 	parser.add_argument('--input_queue_capacity_factor', type=int, default=2, help="")
 	parser.add_argument('--num_input_reader_threads', type=int, default=1, help="")
 	parser.add_argument('--num_preprocess_threads', type=int, default=4, help="")
-	parser.add_argument('--inception_checkpoint_file', type=str, default='', help="")
+	parser.add_argument('--inception_checkpoint_file', type=str, default='checkpoint/inception_v3.ckpt', help="")
 	parser.add_argument('--vocab_file', type=str, default='vocab.txt', help="")
 	parser.add_argument('--num_lstm_units', type=int, default=1024, help="")
 	parser.add_argument('--embedding_size', type=int, default=1024, help="")
-	parser.add_argument('--vocab_size', type=int, default=12000, help="")
-	#parser.add_argument('--vocab_size', type=int, default=2500, help="")
+	parser.add_argument('--image_size', type=int, default=64, help="")
+	parser.add_argument('--vocab_size', type=int, default=2500, help="")
 
 
 	args = parser.parse_args()
