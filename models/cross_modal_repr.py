@@ -337,9 +337,9 @@ class CrossModalRepr():
 				counter += 1
 				if (batch_no % config.save_every_batch) == 0:
 					print( "Saving Model" )
-					self.save(self.model_dir, counter)
+					self.save(counter)
 
-					f_valid_txt.write( 'e:b={}:{}'.format(i,batch_no) )
+					f_valid_txt.write( 'e:b={}:{}\n'.format(i,batch_no) )
 					# validation : text (for now, use training sample)
 					state = self.sess.run( self.outputs['initial_state_infer'],
 											feed_dict={ input_tensors['text_feature_infer']:caption_vectors[0]} )
@@ -351,7 +351,7 @@ class CrossModalRepr():
 																		input_tensors['state_feed']:state } )
 						sentence.append( self.vocab.id_to_word(int(next_word[0])) )
 					print( 'text) ' + ' '.join(sentence) )
-					f_valid_txt.write( 'text) ' + ' '.join(sentence) )
+					f_valid_txt.write( 'text) ' + ' '.join(sentence) + '\n' )
 					# validation : image (for now, use training sample)
 					image_embedding = self.sess.run( self.outputs['image_embeddings_infer'],
 											feed_dict={ input_tensors['image_infer']:images[0]} )
@@ -366,12 +366,12 @@ class CrossModalRepr():
 						sentence.append( self.vocab.id_to_word(int(next_word[0])) )
 					print( 'image) ' + ' '.join(sentence) )
 					print( 'GT) ' + ' '.join([ self.vocab.id_to_word(int(w)) for w in captions[0] ] ) )
-					f_valid_txt.write( 'image) ' + ' '.join(sentence) )
-					f_valid_txt.write( 'GT) ' + ' '.join([ self.vocab.id_to_word(int(w)) for w in captions[0] ] ) )
+					f_valid_txt.write( 'image) ' + ' '.join(sentence) + '\n' )
+					f_valid_txt.write( 'GT) ' + ' '.join([ self.vocab.id_to_word(int(w)) for w in captions[0] ] ) + '\n' )
 					f_valid_txt.flush()
 
 			if i%5 == 0:
-				self.save(self.model_dir, counter, note="epoch{}".format(i))
+				self.save(counter, note="epoch{}".format(i))
 	
 	def load_training_data(self):
 		data_dir = self.config.data_dir
