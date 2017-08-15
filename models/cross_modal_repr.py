@@ -123,7 +123,7 @@ class CrossModalRepr():
 		lstm_outputs_reshaped_image = tf.reshape( lstm_outputs_image, [-1, lstm_cell.output_size] )
 
 		# FC for word prediction
-		with tf.variable_scope('logits') as logits_scope:
+		with tf.variable_scope('logits_fc') as logits_scope:
 			logits_text = tf.contrib.layers.fully_connected( inputs = lstm_outputs_reshaped_text,
 														num_outputs = config.vocab_size,
 														activation_fn = None,
@@ -151,11 +151,11 @@ class CrossModalRepr():
 								tf.reduce_sum( mask_reshaped ),
 								name = 'batch_loss_text' )
 		tf.losses.add_loss( batch_loss_text )
-		# NLL from image feature is not included in the NLL_loss
-#		batch_loss_image = tf.div( tf.reduce_sum( tf.multiply( losses_image, mask_reshaped ) ),
-#								tf.reduce_sum( mask_reshaped ),
-#								name = 'batch_loss_image' )
-#		tf.losses.add_loss( batch_loss_image )
+		# NLL from image feature is included in the NLL_loss
+		batch_loss_image = tf.div( tf.reduce_sum( tf.multiply( losses_image, mask_reshaped ) ),
+								tf.reduce_sum( mask_reshaped ),
+								name = 'batch_loss_image' )
+		tf.losses.add_loss( batch_loss_image )
 		NLL_loss = tf.losses.get_total_loss()
 		self.NLL_loss = NLL_loss
 
@@ -164,20 +164,20 @@ class CrossModalRepr():
 		next_word = tf.argmax( softmax_infer, 1 )
 		
 		# discriminator LSTM
-		with tf.variable_scope('d_lstm', initializer=self.initializer) as lstm_scope:
-			_, initial_state_text = d_lstm_cell( text_feature, zero_state )
+		with tf.variable_scope('disc_lstm', initializer=self.initializer) as lstm_scope:
+			_, d_initial_state_text = d_lstm_cell( text_feature, zero_state )
 			lstm_scope.reuse_variables()
-			_, initial_state_image = d_lstm_cell( image_embeddings, zero_state )
+			_, d_initial_state_image = d_lstm_cell( image_embeddings, zero_state )
 			d_outputs_text, _ = tf.nn.dynamic_rnn( cell = d_lstm_cell,
 													inputs = lstm_outputs_text,
 													sequence_length = text_lengths,
-													initial_state = initial_state_image,
+													initial_state = d_initial_state_text,
 													dtype = tf.float32,
 													scope = lstm_scope )
 			d_outputs_image, _ = tf.nn.dynamic_rnn( cell = d_lstm_cell,
 													inputs = lstm_outputs_image,
 													sequence_length = text_lengths,
-													initial_state = initial_state_image,
+													initial_state = d_initial_state_image,
 													dtype = tf.float32,
 													scope = lstm_scope )
 		# gather last output
@@ -188,7 +188,7 @@ class CrossModalRepr():
 		last_output_image = tf.gather_nd( d_outputs_image, gather_idx )
 
 		# FC discriminator : text-vs-image
-		with tf.variable_scope('d_logits') as logits_scope:
+		with tf.variable_scope('disc_logits_fc') as logits_scope:
 			d_logits_text = tf.contrib.layers.fully_connected( inputs = last_output_text,
 														num_outputs = 1,
 														activation_fn = None,
@@ -208,25 +208,32 @@ class CrossModalRepr():
 										logits = d_logits_image, labels = tf.zeros_like(d_logits_image) ) )
 		d_loss = d_loss_text + d_loss_image
 
-		g_loss_text = tf.reduce_mean( tf.nn.sigmoid_cross_entropy_with_logits( name = 'g_loss_text',
-										logits = d_logits_text, labels = tf.zeros_like(d_logits_text) ) )
+#		g_loss_text = tf.reduce_mean( tf.nn.sigmoid_cross_entropy_with_logits( name = 'g_loss_text',
+#										logits = d_logits_text, labels = tf.zeros_like(d_logits_text) ) )
 		g_loss_image = tf.reduce_mean( tf.nn.sigmoid_cross_entropy_with_logits( name = 'g_loss_image',
 										logits = d_logits_image, labels = tf.ones_like(d_logits_image) ) )
-		g_loss = g_loss_text + g_loss_image
+		g_loss = g_loss_image # + g_loss_text 
+
+		# accuracy
+		d_acc_text = tf.reduce_mean( tf.sigmoid( d_logits_text ) )
+		d_acc_image = tf.reduce_mean( 1-tf.sigmoid( d_logits_image ) )
 
 		t_vars = tf.trainable_variables()
-		d_vars = [var for var in t_vars if 'd_' in var.name]
+		d_vars = [var for var in t_vars if 'disc_' in var.name]
 		g_vars = [var for var in t_vars if 'image_embedding' in var.name]
+		NLL_vars = [var for var in t_vars if var not in d_vars and var not in g_vars]
 
 		summary_NLL_loss = tf.summary.scalar('NLL loss', NLL_loss)
 		summary_d_loss_text = tf.summary.scalar('D loss (text)', d_loss_text)
 		summary_d_loss_image = tf.summary.scalar('D loss (image)', d_loss_image)
 		summary_d_loss = tf.summary.scalar('D loss (text+image)', d_loss)
-		summary_g_loss_text = tf.summary.scalar('G loss (text)', g_loss_text)
+		#summary_g_loss_text = tf.summary.scalar('G loss (text)', g_loss_text)
 		summary_g_loss_image = tf.summary.scalar('G loss (image)', g_loss_image)
 		summary_g_loss = tf.summary.scalar('G loss (text+image)', g_loss)
 		summary_d_merge = tf.summary.merge( [summary_d_loss, summary_d_loss_text, summary_d_loss_image] )
-		summary_g_merge = tf.summary.merge( [summary_g_loss, summary_g_loss_text, summary_g_loss_image] )
+		summary_g_merge = tf.summary.merge( [summary_g_loss, summary_g_loss_image] ) #, summary_g_loss_text] )
+
+		# summary_histogram 추가해서 gradient 제대로 생기는지 확인해볼 차례
 
 		self.input_tensors = {
 			'image' : image,
@@ -242,6 +249,7 @@ class CrossModalRepr():
 
 		self.variables = {
 			'all' : t_vars,
+			'NLL' : NLL_vars,
 			'D' : d_vars,
 			'G' : g_vars,
 		}
@@ -260,6 +268,11 @@ class CrossModalRepr():
 			'next_word' : next_word 
 		}
 
+		self.accuracy = {
+			'D_text' : d_acc_text,
+			'D_image' : d_acc_image,
+		}
+
 		self.summary = {
 			'NLL' : summary_NLL_loss,
 			'D' : summary_d_merge,
@@ -275,10 +288,11 @@ class CrossModalRepr():
 		loss = self.loss
 		outputs = self.outputs
 		variables = self.variables
+		accuracy = self.accuracy
 		summary = self.summary
 
 		optim_NLL = tf.train.AdamOptimizer(config.lr, beta1=config.beta1)\
-									.minimize(loss['NLL'], var_list=variables['all'])
+									.minimize(loss['NLL'], var_list=variables['NLL'])
 		optim_D = tf.train.AdamOptimizer(config.lr, beta1=config.beta1)\
 									.minimize(loss['D'], var_list=variables['D'])
 		optim_G = tf.train.AdamOptimizer(config.lr, beta1=config.beta1)\
@@ -290,6 +304,7 @@ class CrossModalRepr():
 	
 		self.load_training_data()
 
+		counter = 1
 		could_load, checkpoint_counter = self.load(self.model_dir)
 		if could_load:
 			counter = checkpoint_counter
@@ -299,7 +314,6 @@ class CrossModalRepr():
 
 		start_time = time.time()
 		nBatch = self.loaded_data['data_length']/config.batch_size
-		counter = 1
 		summaryWriter = tf.summary.FileWriter( self.model_dir, self.sess.graph )
 		f_valid_txt = open( join(self.model_dir,'valid.txt'), 'a' )
 		for i in range(config.nEpochs):
@@ -329,10 +343,31 @@ class CrossModalRepr():
 												input_tensors['input_mask']:mask,
 												input_tensors['image']:images,
 												} )
+				_, G_loss, summary_G = self.sess.run( [optim_G, loss['G'], summary['G']],
+									feed_dict={ input_tensors['text_feature']:caption_vectors,
+												input_tensors['input_text']:captions,
+												input_tensors['target_text']:captions_shifted,
+												input_tensors['input_mask']:mask,
+												input_tensors['image']:images,
+												} )
 				summaryWriter.add_summary( summary_NLL, counter )
 				summaryWriter.add_summary( summary_D, counter )
 				summaryWriter.add_summary( summary_G, counter )
-				log( i, batch_no, nBatch, ['NLL','D','G'], [NLL_loss,D_loss,G_loss], time.time()-start_time, counter )
+
+				errD_text = accuracy['D_text'].eval(
+									feed_dict={ input_tensors['text_feature']:caption_vectors,
+												input_tensors['input_text']:captions,
+												input_tensors['target_text']:captions_shifted,
+												input_tensors['input_mask']:mask } )
+				errD_image = accuracy['D_image'].eval(
+									feed_dict={ input_tensors['input_text']:captions,
+												input_tensors['target_text']:captions_shifted,
+												input_tensors['input_mask']:mask,
+												input_tensors['image']:images } )
+
+				lossnames_to_print = ['NLL', 'D', 'errD_text', 'errD_img', 'G']
+				losses_to_print = [NLL_loss, D_loss, errD_text, errD_image, G_loss]
+				log( i, batch_no, nBatch, lossnames_to_print, losses_to_print, time.time()-start_time, counter )
 				batch_no += 1
 				counter += 1
 				if (batch_no % config.save_every_batch) == 0:
@@ -345,13 +380,14 @@ class CrossModalRepr():
 											feed_dict={ input_tensors['text_feature_infer']:caption_vectors[0]} )
 					next_word = [self.vocab.start_id]
 					sentence = []
-					while next_word != self.vocab.end_id:
+					while next_word != self.vocab.end_id and len(sentence)<50:
 						next_word, state = self.sess.run( [ self.outputs['next_word'], self.outputs['state_tuple_infer'] ],
 															feed_dict={ input_tensors['input_word']:next_word,
 																		input_tensors['state_feed']:state } )
 						sentence.append( self.vocab.id_to_word(int(next_word[0])) )
 					print( 'text) ' + ' '.join(sentence) )
 					f_valid_txt.write( 'text) ' + ' '.join(sentence) + '\n' )
+
 					# validation : image (for now, use training sample)
 					image_embedding = self.sess.run( self.outputs['image_embeddings_infer'],
 											feed_dict={ input_tensors['image_infer']:images[0]} )
@@ -359,14 +395,30 @@ class CrossModalRepr():
 											feed_dict={ input_tensors['text_feature_infer']:image_embedding[0]} )
 					next_word = [self.vocab.start_id]
 					sentence = []
-					while next_word != self.vocab.end_id:
+					while next_word != self.vocab.end_id and len(sentence)<50:
 						next_word, state = self.sess.run( [ self.outputs['next_word'], self.outputs['state_tuple_infer'] ],
 															feed_dict={ input_tensors['input_word']:next_word,
 																		input_tensors['state_feed']:state } )
 						sentence.append( self.vocab.id_to_word(int(next_word[0])) )
 					print( 'image) ' + ' '.join(sentence) )
-					print( 'GT) ' + ' '.join([ self.vocab.id_to_word(int(w)) for w in captions[0] ] ) )
 					f_valid_txt.write( 'image) ' + ' '.join(sentence) + '\n' )
+
+					# validation : image_wrong (for now, use training sample)
+					image_embedding = self.sess.run( self.outputs['image_embeddings_infer'],
+											feed_dict={ input_tensors['image_infer']:images[1]} )
+					state = self.sess.run( self.outputs['initial_state_infer'],
+											feed_dict={ input_tensors['text_feature_infer']:image_embedding[0]} )
+					next_word = [self.vocab.start_id]
+					sentence = []
+					while next_word != self.vocab.end_id and len(sentence)<50:
+						next_word, state = self.sess.run( [ self.outputs['next_word'], self.outputs['state_tuple_infer'] ],
+															feed_dict={ input_tensors['input_word']:next_word,
+																		input_tensors['state_feed']:state } )
+						sentence.append( self.vocab.id_to_word(int(next_word[0])) )
+					print( 'image_wrong) ' + ' '.join(sentence) )
+					f_valid_txt.write( 'image_wrong) ' + ' '.join(sentence) + '\n' )
+	
+					print( 'GT) ' + ' '.join([ self.vocab.id_to_word(int(w)) for w in captions[0] ] ) )
 					f_valid_txt.write( 'GT) ' + ' '.join([ self.vocab.id_to_word(int(w)) for w in captions[0] ] ) + '\n' )
 					f_valid_txt.flush()
 
