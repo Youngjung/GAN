@@ -10,6 +10,7 @@ from models.text2image import Text2Image
 from models.cyclegan import CycleGAN
 from models.text_decoder import TextDecoder
 from models.cross_modal_repr import CrossModalRepr
+from models.cross_modal_repr_withWrong import CrossModalRepr_wWrong
 from models.misc import visualize, show_all_variables
 
 import tensorflow as tf
@@ -75,6 +76,8 @@ def main(opts):
 			model = TextDecoder( sess, opts )
 		elif opts.model == 'CrossModalRepr':
 			model = CrossModalRepr( sess, opts )
+		elif opts.model == 'CrossModalRepr_wWrong':
+			model = CrossModalRepr_wWrong( sess, opts )
 		else:
 			raise Exception("undefined model")
 
@@ -101,7 +104,7 @@ if __name__ == '__main__':
 	parser = argparse.ArgumentParser(description='')
 	parser.add_argument('--model', default='DCGAN', help='model to use [DCGAN, Text2Image, CycleGAN, TextDecoder]')
 	parser.add_argument('--nEpochs', type=int, default=25, help='# of epoch')
-	parser.add_argument('--save_every_batch', type=int, default=30, 
+	parser.add_argument('--save_every_batch', type=int, default=50, 
 							help='Save Model/Samples every x iterations over batches(does not overwrite previously saved models)')
 	parser.add_argument('--print_every', type=int, default=1, 
 							help='print the debug information every print_freq iterations')
