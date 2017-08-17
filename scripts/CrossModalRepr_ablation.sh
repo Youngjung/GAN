@@ -5,5 +5,6 @@ python main.py \
 --model CrossModalRepr \
 --use_TextNLL False \
 --use_GAN False \
+--use_wrongImage False \
 --note captionNLL_only \
 --nEpochs 200 

@@ -180,6 +180,12 @@ if __name__ == '__main__':
 	parser.add_argument('--image_size', type=int, default=64, help="")
 	parser.add_argument('--vocab_size', type=int, default=2500, help="")
 
+	# for cross_modal_repr
+	parser.add_argument('--use_TextNLL', type=str2bool, default=True, help="")
+	parser.add_argument('--use_CaptionNLL', type=str2bool, default=True, help="")
+	parser.add_argument('--use_GAN', type=str2bool, default=True, help="")
+	parser.add_argument('--use_wrongImage', type=str2bool, default=True, help="")
+
 
 	args = parser.parse_args()
 	main( args )
